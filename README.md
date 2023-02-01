@@ -21,10 +21,11 @@ This includes deserialized flat files, and special response types like verifiabl
 
 ```mermaid
 graph LR
-    A(((fa:fa-person HTTP CLients)))
+    A(((fa:fa-person HTTP</br>clients)))
     B[bifrost-gateway]
     N[[fa:fa-hive bifrost-infra:<br>HTTP load-balancers<br> nginx, TLS termination]]
     S(((saturn.pl<br>CDN)))
+    R(fa:fa-cubes TBD HTTP 302 bypass<br> for client requests with <br>Accept: application/vnd.ipld.raw<br> Accept: application/vnd.ipld.car)
 
 
     A -->| Accept: text/html, *| N
@@ -36,17 +37,22 @@ graph LR
     A -->| Accept: application/cbor | N
     A -->| Accept: application/x-tar | N
     A -->| Accept: application/vnd.ipfs.ipns-record | N
+    A -->| DNSLink Host: en.wikipedia-on-ipfs.org | N
+    A -->| Subdomain Host: cid.ipfs.dweb.link | N
 
     N --> B
     
-    B --->|fa:fa-cube HTTP GET Block | S
-    B ..->|fa:fa-cubes HTTP GET CAR | S
+    B --->|fa:fa-cube HTTP GET Block x N | S
+    B ..->|fa:fa-cubes TBD HTTP GET CAR x N | S
+    R ..-> A
+    B & A ..-> R ..-> S
 ```
 
 
 - IPFS Gateway interface based on reference implementation from [go-libipfs/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#readme)
 - IPFS Backend based on https://strn.network
 - Functional gaps facilitated by temporary delegation to legacy Kubo RPC `(/api/v0`) infra already used by js-ipfs.
+- TBD: raw blocks and CARs either proxied, or redirected to saturn with HTTP 302
 
 ## Open problem
 
