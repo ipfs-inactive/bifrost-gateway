@@ -5,8 +5,8 @@ bifrost-gateway
 
 ## Documentation
 
-- public: [go-libipf/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#documentation)
-- internal: [project rhea @ notion.so/pl-strflt](https://www.notion.so/pl-strflt/Project-Rhea-decentralized-IPFS-gateway-3d5906e7a0d84bea800d5920005dfea6#a432e575bf9b43ecb6a9619f0d90e948)
+- HTTP Gateway implementation: [go-libipf/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#documentation)
+- IPFS backend provided by: [Project Rhea (decentralized IPFS gateway)](https://pl-strflt.notion.site/Project-Rhea-decentralized-IPFS-gateway-3d5906e7a0d84bea800d5920005dfea6)
 
 ## Goals
 
