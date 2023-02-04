@@ -1,0 +1,10 @@
+*.swp
+*.out
+*.coverprofile
+*.test
+*.orig
+*~
+
+.tarball
+
+bifrost-gateway
