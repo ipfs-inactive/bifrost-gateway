@@ -25,7 +25,6 @@ graph LR
     B[bifrost-gateway]
     N[[fa:fa-hive bifrost-infra:<br>HTTP load-balancers<br> nginx, TLS termination]]
     S(((saturn.pl<br>CDN)))
-    R(fa:fa-cubes TBD HTTP 302 bypass<br> for client requests with <br>Accept: application/vnd.ipld.raw<br> Accept: application/vnd.ipld.car)
 
 
     A -->| Accept: text/html, *| N
@@ -44,15 +43,12 @@ graph LR
     
     B --->|fa:fa-cube HTTP GET Block x N | S
     B ..->|fa:fa-cubes TBD HTTP GET CAR x N | S
-    R ..-> A
-    B & A ..-> R ..-> S
 ```
 
 
-- IPFS Gateway interface based on reference implementation from [go-libipfs/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#readme)
-- IPFS Backend based on https://strn.network
-- Functional gaps facilitated by temporary delegation to legacy Kubo RPC `(/api/v0`) infra already used by js-ipfs.
-- TBD: raw blocks and CARs either proxied, or redirected to saturn with HTTP 302
+- IPFS Gateway interface based on reference implementation from [go-libipfs/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#readme).
+- IPFS Backend based on https://strn.network and HTTP client talking to it  via [caboose](https://github.com/filecoin-saturn/caboose) or something else.
+- Functional gaps facilitated by temporary delegation to legacy Kubo RPC `(/api/v0`) infra already used by js-ipfs (or dedicated one).
 
 ## Open problem
 
