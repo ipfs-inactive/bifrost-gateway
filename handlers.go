@@ -9,7 +9,6 @@ import (
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/go-blockservice"
-	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	"github.com/ipfs/go-libipfs/gateway"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -32,15 +31,22 @@ func makeMetricsHandler(port int) (*http.Server, error) {
 }
 
 func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []string, port int) (*http.Server, error) {
-	blockStore, err := newBlockStore(saturnOrchestrator, saturnLogger)
+	// Sets up an exchange based on using Saturn as block storage
+	exch, err := newExchange(saturnOrchestrator, saturnLogger)
 	if err != nil {
 		return nil, err
 	}
 
-	// Sets up an offline (no exchange) blockService based on the Saturn block store.
-	blockService := blockservice.New(blockStore, offline.Exchange(blockStore))
+	// Sets up an LRU cache to store blocks in
+	cacheBlockStore, err := newLruBlockstore(1024) // TODO: configurable/better cache size
+	if err != nil {
+		return nil, err
+	}
 
-	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
+	// Sets up a blockservice which tries the LRU cache and falls back to the exchange
+	blockService := blockservice.New(cacheBlockStore, exch)
+
+	// // Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
 	routing := newProxyRouting(kuboRPC)
 
 	// Creates the gateway with the block service and the routing.
