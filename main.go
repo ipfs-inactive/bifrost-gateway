@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,6 +44,7 @@ func init() {
 
 var rootCmd = &cobra.Command{
 	Use:               "bifrost-gateway",
+	Version:           buildVersion(),
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	Short:             "IPFS Gateway implementation for https://github.com/protocol/bifrost-infra",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -69,7 +72,9 @@ var rootCmd = &cobra.Command{
 			defer wg.Done()
 
 			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
+			log.Printf("  Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
 			log.Printf("Subdomain gateway listening on dweb.link and http://localhost:%d", gatewayPort)
+			log.Printf("  Smoke test (Subdomain+DNSLink+UnixFS+HAMT): http://localhost:%d/ipns/en.wikipedia-on-ipfs.org/", gatewayPort)
 			log.Printf("Legacy RPC at /api/v0 provided by %s", strings.Join(kuboRPC, " "))
 			err := gatewaySrv.ListenAndServe()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -169,4 +174,33 @@ func newAPIHandler(endpoints []string) http.Handler {
 		endpoint := endpoints[rand.Intn(len(endpoints))]
 		http.Redirect(w, r, endpoint+r.URL.Path+"?"+r.URL.RawQuery, http.StatusFound)
 	})
+}
+
+func buildVersion() string {
+	var revision string
+	var day string
+	var dirty bool
+
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "(unknown)"
+	}
+	for _, kv := range info.Settings {
+		switch kv.Key {
+		case "vcs.revision":
+			revision = kv.Value[:7]
+		case "vcs.time":
+			t, _ := time.Parse(time.RFC3339, kv.Value)
+			day = t.UTC().Format("2006-01-02")
+		case "vcs.modified":
+			dirty = kv.Value == "true"
+		}
+	}
+	if dirty {
+		revision += "-dirty"
+	}
+	if revision != "" {
+		return day + "-" + revision
+	}
+	return "(unknown)"
 }
