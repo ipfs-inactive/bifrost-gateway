@@ -144,8 +144,27 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 		},
 	}
 
+	// Creates metrics handler for total response size. Matches the same metrics
+	// from Kubo:
+	// https://github.com/ipfs/kubo/blob/e550d9e4761ea394357c413c02ade142c0dea88c/core/corehttp/metrics.go#L79-L152
+	sum := prometheus.NewSummaryVec(prometheus.SummaryOpts{
+		Namespace:  "ipfs",
+		Subsystem:  "http",
+		Name:       "response_size_bytes",
+		Help:       "The HTTP response sizes in bytes.",
+		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001},
+	}, nil)
+	err = prometheus.Register(sum)
+	if err != nil {
+		return nil, err
+	}
+
+	// Construct the HTTP handler for the gateway.
+	handler := http.Handler(gateway.WithHostname(mux, gwAPI, publicGateways, noDNSLink))
+	handler = promhttp.InstrumentHandlerResponseSize(sum, handler)
+
 	return &http.Server{
-		Handler: gateway.WithHostname(mux, gwAPI, publicGateways, noDNSLink),
+		Handler: handler,
 		Addr:    ":" + strconv.Itoa(port),
 	}, nil
 }
