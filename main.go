@@ -54,6 +54,8 @@ var rootCmd = &cobra.Command{
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
 
+		log.Printf("Starting bifrost-gateway %s", buildVersion())
+
 		gatewaySrv, err := makeGatewayHandler(saturnOrchestrator, saturnLogger, kuboRPC, gatewayPort)
 		if err != nil {
 			return err
@@ -73,8 +75,8 @@ var rootCmd = &cobra.Command{
 
 			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
 			log.Printf("  Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
-			log.Printf("Subdomain gateway listening on dweb.link and http://localhost:%d", gatewayPort)
-			log.Printf("  Smoke test (Subdomain+DNSLink+UnixFS+HAMT): http://localhost:%d/ipns/en.wikipedia-on-ipfs.org/", gatewayPort)
+			log.Printf("Subdomain gateway configured on dweb.link and http://localhost:%d", gatewayPort)
+			log.Printf("  Smoke test (Subdomain+DNSLink+UnixFS+HAMT): http://localhost:%d/ipns/en.wikipedia-on-ipfs.org/wiki/", gatewayPort)
 			log.Printf("Legacy RPC at /api/v0 provided by %s", strings.Join(kuboRPC, " "))
 			err := gatewaySrv.ListenAndServe()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {

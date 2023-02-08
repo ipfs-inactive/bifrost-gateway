@@ -6,10 +6,21 @@ bifrost-gateway
 
 ## Usage
 
+Local build:
+
 ```console
 $ go build
 $ ./bifrost-gateway --help
 ```
+
+<!--
+Prebuild Docker image:
+
+```console
+$ docker pull ipfs/bifrost-gateway:main-latest
+$ docker run --rm -it --net=host ipfs/bifrost-gateway:main-latest --help
+```
+-->
 
 ## Documentation
 
