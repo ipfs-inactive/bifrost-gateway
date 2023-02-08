@@ -41,7 +41,7 @@ type bifrostGateway struct {
 }
 
 func newBifrostGateway(blockService blockservice.BlockService, routing routing.ValueStore) (*bifrostGateway, error) {
-	// Setup the DAG services, which use the CAR block store.
+	// Setup the DAG services, which use the special block store.
 	dagService := merkledag.NewDAGService(blockService)
 
 	// Setup the UnixFS resolver.

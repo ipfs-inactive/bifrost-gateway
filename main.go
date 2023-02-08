@@ -41,9 +41,9 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:               "bifrost",
+	Use:               "bifrost-gateway",
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
-	Short:             "Eagle is a website CMS",
+	Short:             "IPFS Gateway implementation for https://github.com/protocol/bifrost-infra",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		saturnOrchestrator, _ := cmd.Flags().GetString("saturn-orchestrator")
 		saturnLogger, _ := cmd.Flags().GetString("saturn-logger")
@@ -68,8 +68,9 @@ var rootCmd = &cobra.Command{
 		go func() {
 			defer wg.Done()
 
-			log.Printf("Gateway listening on http://localhost:%d", gatewayPort)
-			log.Printf("Redirecting /api/v0 to %s", strings.Join(kuboRPC, " "))
+			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
+			log.Printf("Subdomain gateway listening on dweb.link and http://localhost:%d", gatewayPort)
+			log.Printf("Legacy RPC at /api/v0 provided by %s", strings.Join(kuboRPC, " "))
 			err := gatewaySrv.ListenAndServe()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Printf("Failed to start gateway: %s", err)
@@ -79,7 +80,7 @@ var rootCmd = &cobra.Command{
 
 		go func() {
 			defer wg.Done()
-			log.Printf("Metrics listening on http://127.0.0.1:%d", metricsPort)
+			log.Printf("Metrics exposed at http://127.0.0.1:%d/debug/metrics/prometheus", metricsPort)
 			err := metricsSrv.ListenAndServe()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Printf("Failed to start metrics: %s", err)
