@@ -211,7 +211,7 @@ func newAPIHandler(endpoints []string) http.Handler {
 	// Remaining requests to the API receive a 501, as well as an explanation.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotImplemented)
-		w.Write([]byte("/api/v0 RPC will be removed from gateways as it is not part of the gateway specification, but a legacy feature from Kubo. If you need this API, please self-host a Kubo instance yourself: docs.ipfs.tech/install/command-line"))
+		w.Write([]byte("The /api/v0 Kubo RPC is now discontinued on this server as it is not part of the gateway specification. If you need this API, please self-host a Kubo instance yourself: https://docs.ipfs.tech/install/command-line/"))
 	})
 
 	return mux
