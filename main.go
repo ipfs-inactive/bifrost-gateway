@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/go-blockservice"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	"github.com/ipfs/go-libipfs/gateway"
@@ -171,7 +172,13 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 
 func makeMetricsHandler(port int) (*http.Server, error) {
 	mux := http.NewServeMux()
-	mux.Handle("/debug/metrics/prometheus", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{}))
+
+	gatherers := prometheus.Gatherers{
+		prometheus.DefaultGatherer,
+		caboose.CabooseMetrics,
+	}
+	options := promhttp.HandlerOpts{}
+	mux.Handle("/debug/metrics/prometheus", promhttp.HandlerFor(gatherers, options))
 
 	return &http.Server{
 		Handler: mux,
