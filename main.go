@@ -181,6 +181,12 @@ func newAPIHandler(endpoints []string) http.Handler {
 		http.Redirect(w, r, url, http.StatusFound)
 	})
 
+	mux.HandleFunc("/api/v0/dag/export", func(w http.ResponseWriter, r *http.Request) {
+		cid := r.URL.Query().Get("arg")
+		url := fmt.Sprintf("/ipfs/%s?format=car", cid)
+		http.Redirect(w, r, url, http.StatusFound)
+	})
+
 	mux.HandleFunc("/api/v0/block/get", func(w http.ResponseWriter, r *http.Request) {
 		cid := r.URL.Query().Get("arg")
 		url := fmt.Sprintf("/ipfs/%s?format=raw", cid)
