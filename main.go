@@ -161,12 +161,52 @@ func makeMetricsHandler(port int) (*http.Server, error) {
 }
 
 func newAPIHandler(endpoints []string) http.Handler {
+	mux := http.NewServeMux()
+
+	// Endpoints that can be redirected to the gateway itself as they can be handled
+	// by the path gateway.
+	mux.HandleFunc("/api/v0/cat", func(w http.ResponseWriter, r *http.Request) {
+		cid := r.URL.Query().Get("arg")
+		url := fmt.Sprintf("/ipfs/%s", cid)
+		http.Redirect(w, r, url, http.StatusFound)
+	})
+
+	mux.HandleFunc("/api/v0/dag/get", func(w http.ResponseWriter, r *http.Request) {
+		cid := r.URL.Query().Get("arg")
+		codec := r.URL.Query().Get("output-codec")
+		if codec == "" {
+			codec = "dag-json"
+		}
+		url := fmt.Sprintf("/ipfs/%s?format=%s", cid, codec)
+		http.Redirect(w, r, url, http.StatusFound)
+	})
+
+	mux.HandleFunc("/api/v0/block/get", func(w http.ResponseWriter, r *http.Request) {
+		cid := r.URL.Query().Get("arg")
+		url := fmt.Sprintf("/ipfs/%s?format=raw", cid)
+		http.Redirect(w, r, url, http.StatusFound)
+	})
+
+	// Endpoints that have high traffic volume. We will keep redirecting these
+	// for now to Kubo endpoints that are able to handle these requests.
 	s := rand.NewSource(time.Now().Unix())
 	rand := rand.New(s)
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	redirectToKubo := func(w http.ResponseWriter, r *http.Request) {
 		// Naively choose one of the Kubo RPC clients.
 		endpoint := endpoints[rand.Intn(len(endpoints))]
 		http.Redirect(w, r, endpoint+r.URL.Path+"?"+r.URL.RawQuery, http.StatusFound)
+	}
+
+	mux.HandleFunc("/api/v0/name/resolve", redirectToKubo)
+	mux.HandleFunc("/api/v0/resolve", redirectToKubo)
+	mux.HandleFunc("/api/v0/dag/resolve", redirectToKubo)
+	mux.HandleFunc("/api/v0/dns", redirectToKubo)
+
+	// Remaining requests to the API receive a 501, as well as an explanation.
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotImplemented)
+		w.Write([]byte("/api/v0 RPC will be removed from gateways as it is not part of the gateway specification, but a legacy feature from Kubo. If you need this API, please self-host a Kubo instance yourself: docs.ipfs.tech/install/command-line"))
 	})
+
+	return mux
 }
