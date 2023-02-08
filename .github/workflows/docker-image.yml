@@ -8,6 +8,13 @@ on:
     tags:
       - 'v*'
 
+# we want images in main to always build in-order, so main-latest always points
+# at the latest one but it is ok to build 'latest' and 'release' in parallel,
+# as it does not clash with 'main-*' ones
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   push_to_registry:
     if: github.repository == 'ipfs/bifrost-gateway' || github.event_name == 'workflow_dispatch'

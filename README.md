@@ -13,18 +13,18 @@ $ go build
 $ ./bifrost-gateway --help
 ```
 
-<!--
 Prebuild Docker image:
 
 ```console
 $ docker pull ipfs/bifrost-gateway:main-latest
 $ docker run --rm -it --net=host ipfs/bifrost-gateway:main-latest --help
 ```
--->
+
+List of available revisions: https://hub.docker.com/r/ipfs/bifrost-gateway/tags
 
 ## Documentation
 
-- HTTP Gateway implementation: [go-libipf/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#documentation)
+- HTTP Gateway implementation: [go-libipf/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#readme)
 - IPFS backend provided by: [Project Rhea (decentralized IPFS gateway)](https://pl-strflt.notion.site/Project-Rhea-decentralized-IPFS-gateway-3d5906e7a0d84bea800d5920005dfea6)
 
 ## Goals
@@ -72,7 +72,7 @@ graph LR
 
 ## Lead Maintainer
 
-- IPFS Stewards for now, long term plan to hand over to Bifrost/Saturn (TBD)
+- IPFS Stewards
 
 ## Contributing
 
