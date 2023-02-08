@@ -3,6 +3,14 @@ bifrost-gateway
 
 > Gateway implementation used by [protocol/bifrost-infra](https://github.com/protocol/bifrost-infra)
 
+
+## Usage
+
+```console
+$ go build
+$ ./bifrost-gateway --help
+```
+
 ## Documentation
 
 - HTTP Gateway implementation: [go-libipf/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#documentation)
@@ -50,7 +58,6 @@ graph LR
 - IPFS Backend based on https://strn.network and HTTP client talking to it  via [caboose](https://github.com/filecoin-saturn/caboose) or something else.
 - Functional gaps facilitated by temporary delegation to legacy Kubo RPC `(/api/v0`) infra already used by js-ipfs (or dedicated one).
 
-## Open problem
 
 ## Lead Maintainer
 
