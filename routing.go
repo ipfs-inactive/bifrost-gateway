@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -103,10 +106,25 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 
-	b64 := string(rb)
-	b64 = strings.TrimSpace(b64)
-	b64 = strings.TrimPrefix(b64, "\"")
-	b64 = strings.TrimSuffix(b64, "\"")
+	parts := bytes.Split(bytes.TrimSpace(rb), []byte("\n"))
+	var b64 string
+
+	for _, part := range parts {
+		var evt routing.QueryEvent
+		err = json.Unmarshal(part, &evt)
+		if err != nil {
+			return nil, fmt.Errorf("routing/get value cannot be parsed: %w", err)
+		}
+
+		if evt.Type == routing.Value {
+			b64 = evt.Extra
+			break
+		}
+	}
+
+	if b64 == "" {
+		return nil, errors.New("routing/get value has no key")
+	}
 
 	rb, err = base64.StdEncoding.DecodeString(b64)
 	if err != nil {
