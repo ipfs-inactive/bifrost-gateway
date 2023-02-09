@@ -3,7 +3,7 @@ module github.com/ipfs/bifrost-gateway
 go 1.19
 
 require (
-	github.com/filecoin-saturn/caboose v0.0.0-20230207140819-1c86f6f71fa3
+	github.com/filecoin-saturn/caboose v0.0.0-20230209145517-ba6e6df0ae6b
 	github.com/gogo/protobuf v1.3.2
 	github.com/ipfs/go-blockservice v0.5.0
 	github.com/ipfs/go-cid v0.3.2
