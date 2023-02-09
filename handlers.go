@@ -38,7 +38,7 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 	}
 
 	// Sets up an LRU cache to store blocks in
-	cacheBlockStore, err := newLruBlockstore(1024) // TODO: configurable/better cache size
+	cacheBlockStore, err := newCacheBlockStore(1024) // TODO: configurable/better cache size
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +46,7 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 	// Sets up a blockservice which tries the LRU cache and falls back to the exchange
 	blockService := blockservice.New(cacheBlockStore, exch)
 
-	// // Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
+	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
 	routing := newProxyRouting(kuboRPC)
 
 	// Creates the gateway with the block service and the routing.
