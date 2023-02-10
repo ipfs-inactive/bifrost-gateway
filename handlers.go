@@ -11,6 +11,7 @@ import (
 	"github.com/ipfs/go-blockservice"
 	offline "github.com/ipfs/go-ipfs-exchange-offline"
 	"github.com/ipfs/go-libipfs/gateway"
+	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -60,7 +61,7 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 	mux := http.NewServeMux()
 	mux.Handle("/ipfs/", gwHandler)
 	mux.Handle("/ipns/", gwHandler)
-	mux.Handle("/api/v0/", newAPIHandler(kuboRPC))
+	mux.Handle("/api/v0/", newKuboRPCHandler(kuboRPC))
 
 	// Note: in the future we may want to make this more configurable.
 	noDNSLink := false
@@ -102,47 +103,47 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 	}, nil
 }
 
-func newAPIHandler(endpoints []string) http.Handler {
+func newKuboRPCHandler(endpoints []string) http.Handler {
 	mux := http.NewServeMux()
 
 	// Endpoints that can be redirected to the gateway itself as they can be handled
-	// by the path gateway.
-	mux.HandleFunc("/api/v0/cat", func(w http.ResponseWriter, r *http.Request) {
-		cid := r.URL.Query().Get("arg")
-		url := fmt.Sprintf("/ipfs/%s", cid)
-		http.Redirect(w, r, url, http.StatusFound)
-	})
+	// by the path gateway. We use 303 See Other here to ensure that the API requests
+	// are transformed to GET requests to the gateway.
+	// - https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/303
+	redirectToGateway := func(format string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			path := path.New(r.URL.Query().Get("arg"))
+			url := path.String()
+			if format != "" {
+				url += "?format=" + format
+			}
+			http.Redirect(w, r, url, http.StatusSeeOther)
+		}
+	}
 
+	mux.HandleFunc("/api/v0/cat", redirectToGateway(""))
+	mux.HandleFunc("/api/v0/dag/export", redirectToGateway("car"))
+	mux.HandleFunc("/api/v0/block/get", redirectToGateway("raw"))
 	mux.HandleFunc("/api/v0/dag/get", func(w http.ResponseWriter, r *http.Request) {
-		cid := r.URL.Query().Get("arg")
+		path := path.New(r.URL.Query().Get("arg"))
 		codec := r.URL.Query().Get("output-codec")
 		if codec == "" {
 			codec = "dag-json"
 		}
-		url := fmt.Sprintf("/ipfs/%s?format=%s", cid, codec)
-		http.Redirect(w, r, url, http.StatusFound)
-	})
-
-	mux.HandleFunc("/api/v0/dag/export", func(w http.ResponseWriter, r *http.Request) {
-		cid := r.URL.Query().Get("arg")
-		url := fmt.Sprintf("/ipfs/%s?format=car", cid)
-		http.Redirect(w, r, url, http.StatusFound)
-	})
-
-	mux.HandleFunc("/api/v0/block/get", func(w http.ResponseWriter, r *http.Request) {
-		cid := r.URL.Query().Get("arg")
-		url := fmt.Sprintf("/ipfs/%s?format=raw", cid)
-		http.Redirect(w, r, url, http.StatusFound)
+		url := fmt.Sprintf("%s?format=%s", path.String(), codec)
+		http.Redirect(w, r, url, http.StatusSeeOther)
 	})
 
 	// Endpoints that have high traffic volume. We will keep redirecting these
-	// for now to Kubo endpoints that are able to handle these requests.
+	// for now to Kubo endpoints that are able to handle these requests. We use
+	// 307 Temporary Redirect in order to preserve the original HTTP Method.
+	// - https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/307
 	s := rand.NewSource(time.Now().Unix())
 	rand := rand.New(s)
 	redirectToKubo := func(w http.ResponseWriter, r *http.Request) {
 		// Naively choose one of the Kubo RPC clients.
 		endpoint := endpoints[rand.Intn(len(endpoints))]
-		http.Redirect(w, r, endpoint+r.URL.Path+"?"+r.URL.RawQuery, http.StatusFound)
+		http.Redirect(w, r, endpoint+r.URL.Path+"?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
 	}
 
 	mux.HandleFunc("/api/v0/name/resolve", redirectToKubo)
