@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	gopath "path"
 
@@ -28,7 +29,9 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/node/basicnode"
 	"github.com/ipld/go-ipld-prime/schema"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
+	mc "github.com/multiformats/go-multicodec"
 )
 
 type bifrostGateway struct {
@@ -112,7 +115,19 @@ func (api *bifrostGateway) GetBlock(ctx context.Context, c cid.Cid) (blocks.Bloc
 }
 
 func (api *bifrostGateway) GetIPNSRecord(ctx context.Context, c cid.Cid) ([]byte, error) {
-	return api.routing.GetValue(ctx, "/ipns/"+c.String())
+	// Fails fast if the CID is not an encoded Libp2p Key, avoids wasteful
+	// round trips to the remote routing provider.
+	if mc.Code(c.Type()) != mc.Libp2pKey {
+		return nil, errors.New("provided cid is not an encoded libp2p key")
+	}
+
+	// The value store expects the key itself to be multihash.
+	id, err := peer.FromCid(c)
+	if err != nil {
+		return nil, err
+	}
+
+	return api.routing.GetValue(ctx, "/ipns/"+string(id))
 }
 
 func (api *bifrostGateway) GetDNSLinkRecord(ctx context.Context, hostname string) (ifacepath.Path, error) {
