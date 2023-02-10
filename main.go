@@ -43,8 +43,8 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:               "bifrost-gateway",
-	Version:           buildVersion(),
+	Use:               name,
+	Version:           version,
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	Short:             "IPFS Gateway implementation for https://github.com/protocol/bifrost-infra",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -54,7 +54,7 @@ var rootCmd = &cobra.Command{
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
 
-		log.Printf("Starting bifrost-gateway %s", buildVersion())
+		log.Printf("Starting %s %s", name, version)
 
 		gatewaySrv, err := makeGatewayHandler(saturnOrchestrator, saturnLogger, kuboRPC, gatewayPort)
 		if err != nil {

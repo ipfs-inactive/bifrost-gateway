@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+var name = "bifrost-gateway"
+var version = buildVersion()
+var userAgent = name + "/" + version
+
 func buildVersion() string {
 	var revision string
 	var day string
@@ -13,7 +17,7 @@ func buildVersion() string {
 
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
-		return "(unknown)"
+		return "dev-build"
 	}
 	for _, kv := range info.Settings {
 		switch kv.Key {
@@ -32,7 +36,7 @@ func buildVersion() string {
 	if revision != "" {
 		return day + "-" + revision
 	}
-	return "unknown"
+	return "dev-build"
 }
 
 type withUserAgent struct {
@@ -40,6 +44,6 @@ type withUserAgent struct {
 }
 
 func (adt *withUserAgent) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.Header.Add("User-Agent", "bifrost-gateway/"+buildVersion())
+	req.Header.Add("User-Agent", userAgent)
 	return adt.RoundTripper.RoundTrip(req)
 }
