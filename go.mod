@@ -12,7 +12,7 @@ require (
 	github.com/ipfs/go-ipfs-exchange-offline v0.3.0
 	github.com/ipfs/go-ipld-format v0.4.0
 	github.com/ipfs/go-ipns v0.3.0
-	github.com/ipfs/go-libipfs v0.4.1-0.20230208030004-93dd0a02a18b
+	github.com/ipfs/go-libipfs v0.4.1-0.20230209225807-1c6ed2e96f77
 	github.com/ipfs/go-merkledag v0.9.0
 	github.com/ipfs/go-namesys v0.7.0
 	github.com/ipfs/go-path v0.3.0
