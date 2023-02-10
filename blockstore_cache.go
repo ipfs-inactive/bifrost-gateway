@@ -25,14 +25,14 @@ func newCacheBlockStore(size int) (blockstore.Blockstore, error) {
 		Namespace: "ipfs",
 		Subsystem: "http",
 		Name:      "blockstore_cache_hit",
-		Help:      "The number of LRU BlockStore cache hits.",
+		Help:      "The number of global block cache hits.",
 	})
 
 	cacheRequestsMetric := prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "ipfs",
 		Subsystem: "http",
 		Name:      "blockstore_cache_requests",
-		Help:      "The number of LRU BlockStore cache requests.",
+		Help:      "The number of global block cache requests.",
 	})
 
 	err = prometheus.Register(cacheHitsMetric)
