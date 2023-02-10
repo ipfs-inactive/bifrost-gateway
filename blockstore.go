@@ -22,9 +22,11 @@ func newBlockStore(orchestrator, loggingEndpoint string) (blockstore.Blockstore,
 	}
 
 	saturnClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{
-				ServerName: "strn.pl",
+		Transport: &withUserAgent{
+			RoundTripper: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					ServerName: "strn.pl",
+				},
 			},
 		},
 	}

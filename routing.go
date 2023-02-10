@@ -25,18 +25,18 @@ type proxyRouting struct {
 	rand       *rand.Rand
 }
 
-func newProxyRouting(kuboRPC []string, client *http.Client) routing.ValueStore {
-	if client == nil {
-		client = http.DefaultClient
-	}
-
+func newProxyRouting(kuboRPC []string) routing.ValueStore {
 	s := rand.NewSource(time.Now().Unix())
 	rand := rand.New(s)
 
 	return &proxyRouting{
-		kuboRPC:    kuboRPC,
-		httpClient: client,
-		rand:       rand,
+		kuboRPC: kuboRPC,
+		httpClient: &http.Client{
+			Transport: &withUserAgent{
+				RoundTripper: http.DefaultTransport,
+			},
+		},
+		rand: rand,
 	}
 }
 

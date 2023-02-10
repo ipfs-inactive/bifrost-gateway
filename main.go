@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -44,8 +43,8 @@ func init() {
 }
 
 var rootCmd = &cobra.Command{
-	Use:               "bifrost-gateway",
-	Version:           buildVersion(),
+	Use:               name,
+	Version:           version,
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	Short:             "IPFS Gateway implementation for https://github.com/protocol/bifrost-infra",
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -55,7 +54,7 @@ var rootCmd = &cobra.Command{
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
 
-		log.Printf("Starting bifrost-gateway %s", buildVersion())
+		log.Printf("Starting %s %s", name, version)
 
 		gatewaySrv, err := makeGatewayHandler(saturnOrchestrator, saturnLogger, kuboRPC, gatewayPort)
 		if err != nil {
@@ -116,7 +115,7 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 	blockService := blockservice.New(blockStore, offline.Exchange(blockStore))
 
 	// // Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
-	routing := newProxyRouting(kuboRPC, nil)
+	routing := newProxyRouting(kuboRPC)
 
 	// Creates the gateway with the block service and the routing.
 	gwAPI, err := newBifrostGateway(blockService, routing)
@@ -248,33 +247,4 @@ func newAPIHandler(endpoints []string) http.Handler {
 	})
 
 	return mux
-}
-
-func buildVersion() string {
-	var revision string
-	var day string
-	var dirty bool
-
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "(unknown)"
-	}
-	for _, kv := range info.Settings {
-		switch kv.Key {
-		case "vcs.revision":
-			revision = kv.Value[:7]
-		case "vcs.time":
-			t, _ := time.Parse(time.RFC3339, kv.Value)
-			day = t.UTC().Format("2006-01-02")
-		case "vcs.modified":
-			dirty = kv.Value == "true"
-		}
-	}
-	if dirty {
-		revision += "-dirty"
-	}
-	if revision != "" {
-		return day + "-" + revision
-	}
-	return "(unknown)"
 }
