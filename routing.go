@@ -71,7 +71,7 @@ func (ps *proxyRouting) SearchValue(ctx context.Context, k string, opts ...routi
 	return ch, nil
 }
 
-func (ps *proxyRouting) fetch(ctx context.Context, key string) ([]byte, error) {
+func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err error) {
 	key = strings.TrimPrefix(key, "/ipns/")
 	id, err := peer.IDFromBytes([]byte(key))
 	if err != nil {
@@ -88,6 +88,13 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 
+	goLog.Debugw("routing proxy fetch", "key", key, "from", u.String())
+	defer func() {
+		if err != nil {
+			goLog.Debugw("routing proxy fetch error", "key", key, "from", u.String(), "error", err.Error())
+		}
+	}()
+
 	resp, err := ps.httpClient.Do(&http.Request{
 		Method: http.MethodPost,
 		URL:    u,
@@ -101,7 +108,7 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("routing/get RPC returned unexpected status: %s", resp.Status)
 	}
 
-	rb, err := io.ReadAll(resp.Body)
+	rb, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

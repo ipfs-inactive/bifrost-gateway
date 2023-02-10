@@ -13,6 +13,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	uatomic "go.uber.org/atomic"
+	"go.uber.org/zap/zapcore"
 )
 
 const DefaultCacheBlockStoreSize = 1024
@@ -74,6 +75,10 @@ func (l *cacheBlockStore) Has(ctx context.Context, c cid.Cid) (bool, error) {
 func (l *cacheBlockStore) Get(ctx context.Context, c cid.Cid) (blocks.Block, error) {
 	l.cacheRequestsMetric.Add(1)
 
+	if goLog.Level().Enabled(zapcore.DebugLevel) {
+		goLog.Debugw("block requested from cache", "cid", c.String())
+	}
+
 	blkData, found := l.cache.Get(string(c.Hash()))
 	if !found {
 		return nil, format.ErrNotFound{Cid: c}
@@ -81,6 +86,9 @@ func (l *cacheBlockStore) Get(ctx context.Context, c cid.Cid) (blocks.Block, err
 
 	// It's a HIT!
 	l.cacheHitsMetric.Add(1)
+	if goLog.Level().Enabled(zapcore.DebugLevel) {
+		goLog.Debugw("block found in cache", "cid", c.String())
+	}
 
 	if l.rehash.Load() {
 		rbcid, err := c.Prefix().Sum(blkData)

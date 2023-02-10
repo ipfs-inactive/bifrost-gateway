@@ -31,6 +31,13 @@ func makeMetricsHandler(port int) (*http.Server, error) {
 	}, nil
 }
 
+func withRequestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		goLog.Infow("request received", "url", r.URL, "method", r.Method)
+		next.ServeHTTP(w, r)
+	})
+}
+
 func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []string, port int, blockCacheSize int) (*http.Server, error) {
 	// Sets up an exchange based on using Saturn as block storage
 	exch, err := newExchange(saturnOrchestrator, saturnLogger)
@@ -103,6 +110,9 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 	handler := http.Handler(gateway.WithHostname(mux, gwAPI, publicGateways, noDNSLink))
 	handler = promhttp.InstrumentHandlerResponseSize(sum, handler)
 
+	// Add logging
+	handler = withRequestLogger(handler)
+
 	return &http.Server{
 		Handler: handler,
 		Addr:    ":" + strconv.Itoa(port),
@@ -123,6 +133,8 @@ func newKuboRPCHandler(endpoints []string) http.Handler {
 			if format != "" {
 				url += "?format=" + format
 			}
+
+			goLog.Debugw("api request redirected to gateway", "url", r.URL, "redirect", url)
 			http.Redirect(w, r, url, http.StatusSeeOther)
 		}
 	}
@@ -137,6 +149,7 @@ func newKuboRPCHandler(endpoints []string) http.Handler {
 			codec = "dag-json"
 		}
 		url := fmt.Sprintf("%s?format=%s", path.String(), codec)
+		goLog.Debugw("api request redirected to gateway", "url", r.URL, "redirect", url)
 		http.Redirect(w, r, url, http.StatusSeeOther)
 	})
 
@@ -149,7 +162,9 @@ func newKuboRPCHandler(endpoints []string) http.Handler {
 	redirectToKubo := func(w http.ResponseWriter, r *http.Request) {
 		// Naively choose one of the Kubo RPC clients.
 		endpoint := endpoints[rand.Intn(len(endpoints))]
-		http.Redirect(w, r, endpoint+r.URL.Path+"?"+r.URL.RawQuery, http.StatusTemporaryRedirect)
+		url := endpoint + r.URL.Path + "?" + r.URL.RawQuery
+		goLog.Debugw("api request redirected to kubo", "url", r.URL, "redirect", url)
+		http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 	}
 
 	mux.HandleFunc("/api/v0/name/resolve", redirectToKubo)
@@ -160,6 +175,7 @@ func newKuboRPCHandler(endpoints []string) http.Handler {
 	// Remaining requests to the API receive a 501, as well as an explanation.
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotImplemented)
+		goLog.Debugw("api request returned 501", "url", r.URL)
 		w.Write([]byte("The /api/v0 Kubo RPC is now discontinued on this server as it is not part of the gateway specification. If you need this API, please self-host a Kubo instance yourself: https://docs.ipfs.tech/install/command-line/"))
 	})
 
