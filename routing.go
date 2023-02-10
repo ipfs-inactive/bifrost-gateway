@@ -83,7 +83,7 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) ([]byte, error) {
 	// Naively choose one of the Kubo RPC clients.
 	endpoint := ps.kuboRPC[rand.Intn(len(ps.kuboRPC))]
 
-	u, err := url.Parse(fmt.Sprintf("%s/api/v0/routing/get?arg=%s", endpoint, key))
+	u, err := url.Parse(fmt.Sprintf("%s/api/v0/dht/get?arg=%s", endpoint, key))
 	if err != nil {
 		return nil, err
 	}
