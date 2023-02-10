@@ -27,6 +27,9 @@ type exchangeBsWrapper struct {
 }
 
 func (e *exchangeBsWrapper) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second*30)
+	defer cancel()
+
 	return e.bstore.Get(ctx, c)
 }
 
