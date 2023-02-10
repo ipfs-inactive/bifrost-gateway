@@ -121,7 +121,7 @@ func (api *bifrostGateway) GetIPNSRecord(ctx context.Context, c cid.Cid) ([]byte
 		return nil, errors.New("provided cid is not an encoded libp2p key")
 	}
 
-	// The value store expects the key itself to be encoded as a multihash.
+	// The value store expects the key itself to be multihash.
 	id, err := peer.FromCid(c)
 	if err != nil {
 		return nil, err

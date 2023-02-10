@@ -98,7 +98,7 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status from remote gateway: %s", resp.Status)
+		return nil, fmt.Errorf("routing/get RPC returned unexpected status: %s", resp.Status)
 	}
 
 	rb, err := io.ReadAll(resp.Body)
@@ -113,7 +113,7 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) ([]byte, error) {
 		var evt routing.QueryEvent
 		err = json.Unmarshal(part, &evt)
 		if err != nil {
-			return nil, fmt.Errorf("routing/get value cannot be parsed: %w", err)
+			return nil, fmt.Errorf("routing/get RPC response cannot be parsed: %w", err)
 		}
 
 		if evt.Type == routing.Value {
@@ -123,7 +123,7 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) ([]byte, error) {
 	}
 
 	if b64 == "" {
-		return nil, errors.New("routing/get value has no key")
+		return nil, errors.New("routing/get RPC returned no value")
 	}
 
 	rb, err = base64.StdEncoding.DecodeString(b64)
