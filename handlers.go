@@ -30,7 +30,7 @@ func makeMetricsHandler(port int) (*http.Server, error) {
 	}, nil
 }
 
-func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []string, port int) (*http.Server, error) {
+func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []string, port int, blockCacheSize int) (*http.Server, error) {
 	// Sets up an exchange based on using Saturn as block storage
 	exch, err := newExchange(saturnOrchestrator, saturnLogger)
 	if err != nil {
@@ -38,7 +38,7 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 	}
 
 	// Sets up an LRU cache to store blocks in
-	cacheBlockStore, err := newCacheBlockStore(1024) // TODO: configurable/better cache size
+	cacheBlockStore, err := newCacheBlockStore(blockCacheSize)
 	if err != nil {
 		return nil, err
 	}

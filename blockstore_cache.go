@@ -15,6 +15,8 @@ import (
 	uatomic "go.uber.org/atomic"
 )
 
+const DefaultCacheBlockStoreSize = 1024
+
 func newCacheBlockStore(size int) (blockstore.Blockstore, error) {
 	c, err := lru.New2Q[string, []byte](size)
 	if err != nil {

@@ -27,6 +27,7 @@ func init() {
 	rootCmd.Flags().StringSlice("kubo-rpc", []string{}, "Kubo RPC nodes that will handle /api/v0 requests (can be set multiple times)")
 	rootCmd.Flags().Int("gateway-port", 8080, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8040, "metrics port")
+	rootCmd.Flags().Int("block-cache-size", DefaultCacheBlockStoreSize, "the size of the in-memory block cache")
 
 	rootCmd.MarkFlagRequired("saturn-orchestrator")
 	rootCmd.MarkFlagRequired("saturn-logger")
@@ -44,10 +45,11 @@ var rootCmd = &cobra.Command{
 		kuboRPC, _ := cmd.Flags().GetStringSlice("kubo-rpc")
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
+		blockCacheSize, _ := cmd.Flags().GetInt("block-cache-size")
 
 		log.Printf("Starting %s %s", name, version)
 
-		gatewaySrv, err := makeGatewayHandler(saturnOrchestrator, saturnLogger, kuboRPC, gatewayPort)
+		gatewaySrv, err := makeGatewayHandler(saturnOrchestrator, saturnLogger, kuboRPC, gatewayPort, blockCacheSize)
 		if err != nil {
 			return err
 		}
@@ -64,11 +66,12 @@ var rootCmd = &cobra.Command{
 		go func() {
 			defer wg.Done()
 
-			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
-			log.Printf("  Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
-			log.Printf("Subdomain gateway configured on dweb.link and http://localhost:%d", gatewayPort)
-			log.Printf("  Smoke test (Subdomain+DNSLink+UnixFS+HAMT): http://localhost:%d/ipns/en.wikipedia-on-ipfs.org/wiki/", gatewayPort)
+			log.Printf("Block cache size: %d", blockCacheSize)
 			log.Printf("Legacy RPC at /api/v0 provided by %s", strings.Join(kuboRPC, " "))
+			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
+			log.Printf("Subdomain gateway configured on dweb.link and http://localhost:%d", gatewayPort)
+			log.Printf("Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
+			log.Printf("Smoke test (Subdomain+DNSLink+UnixFS+HAMT): http://localhost:%d/ipns/en.wikipedia-on-ipfs.org/wiki/", gatewayPort)
 			err := gatewaySrv.ListenAndServe()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Printf("Failed to start gateway: %s", err)

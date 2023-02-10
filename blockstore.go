@@ -14,6 +14,8 @@ import (
 	blocks "github.com/ipfs/go-libipfs/blocks"
 )
 
+const GetBlockTimeout = time.Second * 30
+
 func newExchange(orchestrator, loggingEndpoint string) (exchange.Interface, error) {
 	b, err := newBlockStore(orchestrator, loggingEndpoint)
 	if err != nil {
@@ -27,7 +29,7 @@ type exchangeBsWrapper struct {
 }
 
 func (e *exchangeBsWrapper) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second*30)
+	ctx, cancel := context.WithTimeout(ctx, GetBlockTimeout)
 	defer cancel()
 
 	return e.bstore.Get(ctx, c)
@@ -50,7 +52,6 @@ func (e *exchangeBsWrapper) GetBlocks(ctx context.Context, cids []cid.Cid) (<-ch
 }
 
 func (e *exchangeBsWrapper) NotifyNewBlocks(ctx context.Context, blks ...blocks.Block) error {
-	//TODO implement me
 	return nil
 }
 
