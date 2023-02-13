@@ -14,7 +14,7 @@ import (
 	blocks "github.com/ipfs/go-libipfs/blocks"
 )
 
-const GetBlockTimeout = time.Second * 30
+const GetBlockTimeout = time.Second * 60
 
 func newExchange(orchestrator, loggingEndpoint string) (exchange.Interface, error) {
 	b, err := newBlockStore(orchestrator, loggingEndpoint)
