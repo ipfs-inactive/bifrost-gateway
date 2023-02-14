@@ -11,8 +11,11 @@ import (
 	"strings"
 	"sync"
 
+	golog "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 )
+
+var goLog = golog.Logger("bifrost-gateway")
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {

@@ -22,6 +22,10 @@ $ docker run --rm -it --net=host ipfs/bifrost-gateway:main-latest --help
 
 List of available revisions: https://hub.docker.com/r/ipfs/bifrost-gateway/tags
 
+### How to debug?
+
+See [`GOLOG_LOG_LEVEL`](./docs/environment-variables.md#golog_log_level).
+
 ## Documentation
 
 - HTTP Gateway implementation: [go-libipf/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#readme)

@@ -12,6 +12,7 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	blocks "github.com/ipfs/go-libipfs/blocks"
+	"go.uber.org/zap/zapcore"
 )
 
 const GetBlockTimeout = time.Second * 60
@@ -31,6 +32,10 @@ type exchangeBsWrapper struct {
 func (e *exchangeBsWrapper) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
 	ctx, cancel := context.WithTimeout(ctx, GetBlockTimeout)
 	defer cancel()
+
+	if goLog.Level().Enabled(zapcore.DebugLevel) {
+		goLog.Debugw("block requested from saturn", "cid", c.String())
+	}
 
 	return e.bstore.Get(ctx, c)
 }

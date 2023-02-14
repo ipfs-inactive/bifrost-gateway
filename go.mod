@@ -14,6 +14,7 @@ require (
 	github.com/ipfs/go-ipld-format v0.4.0
 	github.com/ipfs/go-ipns v0.3.0
 	github.com/ipfs/go-libipfs v0.4.1-0.20230209225807-1c6ed2e96f77
+	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/ipfs/go-merkledag v0.9.0
 	github.com/ipfs/go-namesys v0.7.0
 	github.com/ipfs/go-path v0.3.0
@@ -28,6 +29,7 @@ require (
 	github.com/spf13/cobra v1.6.1
 	github.com/stretchr/testify v1.8.1
 	go.uber.org/atomic v1.10.0
+	go.uber.org/zap v1.24.0
 )
 
 require (
@@ -60,7 +62,6 @@ require (
 	github.com/ipfs/go-ipld-cbor v0.0.6 // indirect
 	github.com/ipfs/go-ipld-legacy v0.1.1 // indirect
 	github.com/ipfs/go-log v1.0.5 // indirect
-	github.com/ipfs/go-log/v2 v2.5.1 // indirect
 	github.com/ipfs/go-metrics-interface v0.0.1 // indirect
 	github.com/ipfs/go-verifcid v0.0.2 // indirect
 	github.com/ipld/go-car v0.5.0 // indirect
@@ -109,7 +110,6 @@ require (
 	go.opentelemetry.io/otel v1.12.0 // indirect
 	go.opentelemetry.io/otel/trace v1.12.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
-	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.5.0 // indirect
 	golang.org/x/exp v0.0.0-20230131160201-f062dba9d201 // indirect
 	golang.org/x/mod v0.7.0 // indirect
