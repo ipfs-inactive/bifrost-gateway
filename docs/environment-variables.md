@@ -22,7 +22,7 @@ Default: `error`
 Example:
 
 ```console
-GOLOG_LOG_LEVEL="error,bifrost-gateway=debug" bifrost-gateway
+GOLOG_LOG_LEVEL="error,bifrost-gateway=debug,caboose=debug" bifrost-gateway
 ```
 
 ## `GOLOG_LOG_FMT`
