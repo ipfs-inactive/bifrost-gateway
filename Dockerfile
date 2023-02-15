@@ -64,7 +64,7 @@ ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 
 # TODO: allow overriding below via env?
 CMD [ \
-  "--saturn-orchestrator", "https://orchestrator.strn.pl/nodes/nearby", \
+  "--saturn-orchestrator", "https://orchestrator.strn.pl/nodes/nearby?count=1000", \
   "--saturn-logger", "https://twb3qukm2i654i3tnvx36char40aymqq.lambda-url.us-west-2.on.aws", \
   "--kubo-rpc", "https://node0.delegate.ipfs.io", "--kubo-rpc", "https://node1.delegate.ipfs.io", "--kubo-rpc", "https://node2.delegate.ipfs.io", "--kubo-rpc", "https://node3.delegate.ipfs.io", \
   "--gateway-port", "8081", \
