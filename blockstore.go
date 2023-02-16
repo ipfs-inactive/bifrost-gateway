@@ -18,7 +18,7 @@ import (
 const GetBlockTimeout = time.Second * 60
 
 func newExchange(orchestrator, loggingEndpoint string) (exchange.Interface, error) {
-	b, err := newBlockStore(orchestrator, loggingEndpoint)
+	b, err := newCabooseBlockStore(orchestrator, loggingEndpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (e *exchangeBsWrapper) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 	defer cancel()
 
 	if goLog.Level().Enabled(zapcore.DebugLevel) {
-		goLog.Debugw("block requested from saturn", "cid", c.String())
+		goLog.Debugw("block requested from strn", "cid", c.String())
 	}
 
 	return e.bstore.Get(ctx, c)
@@ -66,15 +66,25 @@ func (e *exchangeBsWrapper) Close() error {
 
 var _ exchange.Interface = (*exchangeBsWrapper)(nil)
 
-func newBlockStore(orchestrator, loggingEndpoint string) (blockstore.Blockstore, error) {
-	oe, err := url.Parse(orchestrator)
-	if err != nil {
-		return nil, err
+func newCabooseBlockStore(orchestrator, loggingEndpoint string) (blockstore.Blockstore, error) {
+	var (
+		orchURL *url.URL
+		loggURL *url.URL
+		err     error
+	)
+
+	if orchestrator != "" {
+		orchURL, err = url.Parse(orchestrator)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	le, err := url.Parse(loggingEndpoint)
-	if err != nil {
-		return nil, err
+	if loggingEndpoint != "" {
+		loggURL, err = url.Parse(loggingEndpoint)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	saturnClient := &http.Client{
@@ -87,16 +97,20 @@ func newBlockStore(orchestrator, loggingEndpoint string) (blockstore.Blockstore,
 		},
 	}
 
-	return caboose.NewCaboose(&caboose.Config{
-		OrchestratorEndpoint: *oe,
-		OrchestratorClient:   http.DefaultClient,
+	saturnServiceClient := &http.Client{
+		Transport: &withUserAgent{RoundTripper: http.DefaultTransport},
+	}
 
-		LoggingEndpoint: *le,
-		LoggingClient:   http.DefaultClient,
+	return caboose.NewCaboose(&caboose.Config{
+		OrchestratorEndpoint: orchURL,
+		OrchestratorClient:   saturnServiceClient,
+
+		LoggingEndpoint: *loggURL,
+		LoggingClient:   saturnServiceClient,
 		LoggingInterval: 5 * time.Second,
 
 		DoValidation: true,
 		PoolRefresh:  5 * time.Minute,
-		Client:       saturnClient,
+		SaturnClient: saturnClient,
 	})
 }
