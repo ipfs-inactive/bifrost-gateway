@@ -9,6 +9,7 @@ import (
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/go-blockservice"
+	bstore "github.com/ipfs/go-ipfs-blockstore"
 	"github.com/ipfs/go-libipfs/gateway"
 	"github.com/ipfs/interface-go-ipfs-core/path"
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,6 +51,9 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 	if err != nil {
 		return nil, err
 	}
+
+	// Set up support for identity hashes (https://github.com/ipfs/bifrost-gateway/issues/38)
+	cacheBlockStore = bstore.NewIdStore(cacheBlockStore)
 
 	// Sets up a blockservice which tries the LRU cache and falls back to the exchange
 	blockService := blockservice.New(cacheBlockStore, exch)
