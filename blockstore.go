@@ -88,6 +88,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string) (blockstore.Bloc
 	}
 
 	saturnClient := &http.Client{
+		Timeout: caboose.DefaultSaturnRequestTimeout,
 		Transport: &withUserAgent{
 			RoundTripper: &http.Transport{
 				TLSClientConfig: &tls.Config{
@@ -98,6 +99,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string) (blockstore.Bloc
 	}
 
 	saturnServiceClient := &http.Client{
+		Timeout:   caboose.DefaultSaturnRequestTimeout,
 		Transport: &withUserAgent{RoundTripper: http.DefaultTransport},
 	}
 
