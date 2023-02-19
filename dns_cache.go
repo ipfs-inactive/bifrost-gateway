@@ -19,7 +19,7 @@ func init() {
 	// catastrophic failures like https://github.com/ipfs/bifrost-gateway/issues/34
 	options := dnscache.ResolverRefreshOptions{}
 	options.ClearUnused = false
-	options.PersistOnFailure = false
+	options.PersistOnFailure = true
 
 	// Every dnsCacheRefreshInterval we check for updates, but if there is
 	// none, or if domain disappears, we keep the last cached version
