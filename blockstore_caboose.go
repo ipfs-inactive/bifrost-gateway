@@ -10,7 +10,7 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 )
 
-func newCabooseBlockStore(orchestrator, loggingEndpoint string) (blockstore.Blockstore, error) {
+func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS) (blockstore.Blockstore, error) {
 	var (
 		orchURL *url.URL
 		loggURL *url.URL
@@ -35,7 +35,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string) (blockstore.Bloc
 		Timeout: caboose.DefaultSaturnRequestTimeout,
 		Transport: &withUserAgent{
 			RoundTripper: &http.Transport{
-				DialContext: dialWithCachedDNS,
+				DialContext: cdns.dialWithCachedDNS,
 			},
 		},
 	}
@@ -50,7 +50,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string) (blockstore.Bloc
 				MaxIdleConnsPerHost: 100,
 				IdleConnTimeout:     90 * time.Second,
 
-				DialContext: dialWithCachedDNS,
+				DialContext: cdns.dialWithCachedDNS,
 
 				// Saturn Weltschmerz
 				TLSClientConfig: &tls.Config{

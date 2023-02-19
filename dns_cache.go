@@ -8,37 +8,46 @@ import (
 	"github.com/rs/dnscache"
 )
 
-// Local DNS cache because in this world things are ephemeral
-var dnsCache = &dnscache.Resolver{}
-
 // How often should we check for successful updates to cached entries
 const dnsCacheRefreshInterval = 5 * time.Minute
 
-func init() {
+// Local DNS cache because in this world things are ephemeral
+type cachedDNS struct {
+	resolver  *dnscache.Resolver
+	refresher *time.Ticker
+}
+
+func newCachedDNS(refreshInterval time.Duration) *cachedDNS {
+	cache := &cachedDNS{
+		resolver:  &dnscache.Resolver{},
+		refresher: time.NewTicker(refreshInterval),
+	}
+
 	// Configure DNS cache to not remove stale records to protect gateway from
 	// catastrophic failures like https://github.com/ipfs/bifrost-gateway/issues/34
 	options := dnscache.ResolverRefreshOptions{}
 	options.ClearUnused = false
 	options.PersistOnFailure = true
 
-	// Every dnsCacheRefreshInterval we check for updates, but if there is
+	// Every refreshInterval we check for updates, but if there is
 	// none, or if domain disappears, we keep the last cached version
-	go func() {
-		t := time.NewTicker(dnsCacheRefreshInterval)
-		defer t.Stop()
-		for range t.C {
-			dnsCache.RefreshWithOptions(options)
+	go func(cdns *cachedDNS) {
+		defer cdns.refresher.Stop()
+		for range cdns.refresher.C {
+			cdns.resolver.RefreshWithOptions(options)
 		}
-	}()
+	}(cache)
+
+	return cache
 }
 
-// dialWithCachedDNS implements DialContext that uses dnsCache
-func dialWithCachedDNS(ctx context.Context, network string, addr string) (conn net.Conn, err error) {
+// dialWithCachedDNS implements DialContext that uses cachedDNS
+func (cdns *cachedDNS) dialWithCachedDNS(ctx context.Context, network string, addr string) (conn net.Conn, err error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
 		return nil, err
 	}
-	ips, err := dnsCache.LookupHost(ctx, host)
+	ips, err := cdns.resolver.LookupHost(ctx, host)
 	if err != nil {
 		return nil, err
 	}
@@ -51,4 +60,9 @@ func dialWithCachedDNS(ctx context.Context, network string, addr string) (conn n
 		}
 	}
 	return
+}
+
+func (cdns *cachedDNS) Close() error {
+	cdns.refresher.Stop()
+	return nil
 }

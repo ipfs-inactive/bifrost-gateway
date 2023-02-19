@@ -13,8 +13,8 @@ import (
 
 const GetBlockTimeout = time.Second * 60
 
-func newExchange(orchestrator, loggingEndpoint string) (exchange.Interface, error) {
-	b, err := newCabooseBlockStore(orchestrator, loggingEndpoint)
+func newExchange(orchestrator, loggingEndpoint string, cdns *cachedDNS) (exchange.Interface, error) {
+	b, err := newCabooseBlockStore(orchestrator, loggingEndpoint, cdns)
 	if err != nil {
 		return nil, err
 	}
