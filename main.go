@@ -24,9 +24,15 @@ func main() {
 	}
 }
 
+const (
+	DefaultSaturnLogger       = "https://logs.strn.network"
+	DefaultSaturnOrchestrator = "https://orchestrator.strn.pl/nodes/nearby"
+
+	EnvSaturnLogger       = "STRN_LOGGER_URL"
+	EnvSaturnOrchestrator = "STRN_ORCHESTRATOR_URL"
+)
+
 func init() {
-	rootCmd.Flags().String("saturn-orchestrator", "", "url of the saturn orchestrator endpoint")
-	rootCmd.Flags().String("saturn-logger", "", "url of the saturn logging endpoint")
 	rootCmd.Flags().StringSlice("kubo-rpc", []string{}, "Kubo RPC nodes that will handle /api/v0 requests (can be set multiple times)")
 	rootCmd.Flags().Int("gateway-port", 8080, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8040, "metrics port")
@@ -43,8 +49,8 @@ var rootCmd = &cobra.Command{
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	Short:             "IPFS Gateway implementation for https://github.com/protocol/bifrost-infra",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		saturnOrchestrator, _ := cmd.Flags().GetString("saturn-orchestrator")
-		saturnLogger, _ := cmd.Flags().GetString("saturn-logger")
+		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, DefaultSaturnOrchestrator)
+		saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
 		kuboRPC, _ := cmd.Flags().GetStringSlice("kubo-rpc")
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
@@ -100,4 +106,12 @@ var rootCmd = &cobra.Command{
 		wg.Wait()
 		return nil
 	},
+}
+
+func getEnv(key, defaultValue string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	return value
 }
