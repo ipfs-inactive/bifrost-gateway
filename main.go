@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -30,13 +31,13 @@ const (
 
 	EnvSaturnLogger       = "STRN_LOGGER_URL"
 	EnvSaturnOrchestrator = "STRN_ORCHESTRATOR_URL"
+	EnvBlockCacheSize     = "BLOCK_CACHE_SIZE"
+	EnvKuboRPC            = "KUBO_RPC_URLS"
 )
 
 func init() {
-	rootCmd.Flags().StringSlice("kubo-rpc", []string{}, "Kubo RPC nodes that will handle /api/v0 requests (can be set multiple times)")
 	rootCmd.Flags().Int("gateway-port", 8080, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8040, "metrics port")
-	rootCmd.Flags().Int("block-cache-size", DefaultCacheBlockStoreSize, "the size of the in-memory block cache")
 
 	rootCmd.MarkFlagRequired("saturn-orchestrator")
 	rootCmd.MarkFlagRequired("saturn-logger")
@@ -49,12 +50,18 @@ var rootCmd = &cobra.Command{
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	Short:             "IPFS Gateway implementation for https://github.com/protocol/bifrost-infra",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, DefaultSaturnOrchestrator)
-		saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
-		kuboRPC, _ := cmd.Flags().GetStringSlice("kubo-rpc")
+		// Get flags.
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
-		blockCacheSize, _ := cmd.Flags().GetInt("block-cache-size")
+
+		// Get env variables.
+		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, DefaultSaturnOrchestrator)
+		saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
+		kuboRPC := strings.Split(os.Getenv(EnvKuboRPC), ",")
+		blockCacheSize, err := getEnvInt(EnvBlockCacheSize, DefaultCacheBlockStoreSize)
+		if err != nil {
+			return err
+		}
 
 		log.Printf("Starting %s %s", name, version)
 
@@ -114,4 +121,12 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func getEnvInt(key string, defaultValue int) (int, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue, nil
+	}
+	return strconv.Atoi(value)
 }
