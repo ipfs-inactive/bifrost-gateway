@@ -39,14 +39,14 @@ func withRequestLogger(next http.Handler) http.Handler {
 	})
 }
 
-func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []string, port int, blockCacheSize int) (*http.Server, error) {
+func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS) (*http.Server, error) {
 	// Sets up an exchange based on using Saturn as block storage
-	exch, err := newExchange(saturnOrchestrator, saturnLogger)
+	exch, err := newExchange(saturnOrchestrator, saturnLogger, cdns)
 	if err != nil {
 		return nil, err
 	}
 
-	// Sets up an LRU cache to store blocks in
+	// Sets up a cache to store blocks in
 	cacheBlockStore, err := newCacheBlockStore(blockCacheSize)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []strin
 	// Set up support for identity hashes (https://github.com/ipfs/bifrost-gateway/issues/38)
 	cacheBlockStore = bstore.NewIdStore(cacheBlockStore)
 
-	// Sets up a blockservice which tries the LRU cache and falls back to the exchange
+	// Sets up a blockservice which tries the cache and falls back to the exchange
 	blockService := blockservice.New(cacheBlockStore, exch)
 
 	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.

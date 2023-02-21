@@ -26,6 +26,7 @@ require (
 	github.com/libp2p/go-libp2p v0.25.1
 	github.com/multiformats/go-multicodec v0.7.0
 	github.com/prometheus/client_golang v1.14.0
+	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/spf13/cobra v1.6.1
 	github.com/stretchr/testify v1.8.1
 	go.uber.org/atomic v1.10.0

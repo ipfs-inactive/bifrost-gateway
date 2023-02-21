@@ -52,7 +52,10 @@ var rootCmd = &cobra.Command{
 
 		log.Printf("Starting %s %s", name, version)
 
-		gatewaySrv, err := makeGatewayHandler(saturnOrchestrator, saturnLogger, kuboRPC, gatewayPort, blockCacheSize)
+		cdns := newCachedDNS(dnsCacheRefreshInterval)
+		defer cdns.Close()
+
+		gatewaySrv, err := makeGatewayHandler(saturnOrchestrator, saturnLogger, kuboRPC, gatewayPort, blockCacheSize, cdns)
 		if err != nil {
 			return err
 		}
