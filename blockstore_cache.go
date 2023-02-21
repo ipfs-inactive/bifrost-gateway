@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
@@ -127,7 +126,7 @@ func (l *cacheBlockStore) PutMany(ctx context.Context, blks []blocks.Block) erro
 }
 
 func (l *cacheBlockStore) AllKeysChan(ctx context.Context) (<-chan cid.Cid, error) {
-	return nil, errors.New("not implemented")
+	return nil, errNotImplemented
 }
 
 func (l *cacheBlockStore) HashOnRead(enabled bool) {

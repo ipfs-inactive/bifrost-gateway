@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 )
@@ -26,13 +27,15 @@ func main() {
 }
 
 const (
-	DefaultSaturnLogger       = "https://logs.strn.network"
-	DefaultSaturnOrchestrator = "https://orchestrator.strn.pl/nodes/nearby"
+	DefaultSaturnLogger = "https://logs.strn.network"
+	DefaultProxyGateway = "http://127.0.0.1:8080"
+	DefaultKuboPRC      = "http://127.0.0.1:8080"
 
 	EnvSaturnLogger       = "STRN_LOGGER_URL"
 	EnvSaturnOrchestrator = "STRN_ORCHESTRATOR_URL"
-	EnvBlockCacheSize     = "BLOCK_CACHE_SIZE"
+	EnvProxyGateway       = "PROXY_GATEWAY_URL"
 	EnvKuboRPC            = "KUBO_RPC_URL"
+	EnvBlockCacheSize     = "BLOCK_CACHE_SIZE"
 )
 
 func init() {
@@ -57,9 +60,11 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
 
 		// Get env variables.
-		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, DefaultSaturnOrchestrator)
+		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, "")
 		saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
-		kuboRPC := strings.Split(os.Getenv(EnvKuboRPC), ",")
+		proxyGateway := getEnvs(EnvProxyGateway, DefaultProxyGateway)
+		kuboRPC := getEnvs(EnvKuboRPC, DefaultKuboPRC)
+
 		blockCacheSize, err := getEnvInt(EnvBlockCacheSize, DefaultCacheBlockStoreSize)
 		if err != nil {
 			return err
@@ -70,7 +75,22 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		cdns := newCachedDNS(dnsCacheRefreshInterval)
 		defer cdns.Close()
 
-		gatewaySrv, err := makeGatewayHandler(saturnOrchestrator, saturnLogger, kuboRPC, gatewayPort, blockCacheSize, cdns)
+		var bs blockstore.Blockstore
+
+		if saturnOrchestrator != "" {
+			log.Printf("Proxying gateway block requests to Saturn at %s", saturnOrchestrator)
+			bs, err = newCabooseBlockStore(saturnOrchestrator, saturnLogger, cdns)
+			if err != nil {
+				return err
+			}
+		} else if len(proxyGateway) != 0 {
+			log.Printf("Proxying gateway block requests to %s", strings.Join(proxyGateway, " "))
+			bs = newProxyBlockStore(proxyGateway, cdns)
+		} else {
+			return errors.New("neither saturn orchestrator or proxy gateway are configured")
+		}
+
+		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize)
 		if err != nil {
 			return err
 		}
@@ -126,6 +146,15 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func getEnvs(key, defaultValue string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		value = defaultValue
+	}
+	value = strings.TrimSpace(value)
+	return strings.Split(value, ",")
 }
 
 func getEnvInt(key string, defaultValue int) (int, error) {
