@@ -26,6 +26,10 @@ List of available revisions: https://hub.docker.com/r/ipfs/bifrost-gateway/tags
 
 See [`GOLOG_LOG_LEVEL`](./docs/environment-variables.md#golog_log_level).
 
+## Configuration
+
+See `./bifrost-gateway --help` and [`./docs/environment-variables.md`](./docs/environment-variables.md)
+
 ## Documentation
 
 - HTTP Gateway implementation: [go-libipf/gateway](https://github.com/ipfs/go-libipfs/tree/main/gateway#readme)

@@ -44,10 +44,9 @@ MAINTAINER IPFS Stewards <w3dt-stewards-ip@protocol.ai>
 ENV GOPATH                 /go
 ENV SRC_PATH               /go/src/github.com/ipfs/bifrost-gateway
 ENV BIFROST_GATEWAY_PATH   /data/bifrost-gateway
-
-EXPOSE 9094
-EXPOSE 9095
-EXPOSE 9096
+ENV STRN_LOGGER_URL        https://twb3qukm2i654i3tnvx36char40aymqq.lambda-url.us-west-2.on.aws
+ENV STRN_ORCHESTRATOR_URL  https://orchestrator.strn.pl/nodes/nearby?count=1000&core=true
+ENV KUBO_RPC_URL           https://node0.delegate.ipfs.io,https://node1.delegate.ipfs.io,https://node2.delegate.ipfs.io,https://node3.delegate.ipfs.io
 
 COPY --from=builder $GOPATH/bin/bifrost-gateway /usr/local/bin/bifrost-gateway
 COPY --from=builder $SRC_PATH/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -62,11 +61,4 @@ RUN mkdir -p $BIFROST_GATEWAY_PATH && \
 VOLUME $BIFROST_GATEWAY_PATH
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 
-# TODO: allow overriding below via env?
-CMD [ \
-  "--saturn-orchestrator", "https://orchestrator.strn.pl/nodes/nearby?count=1000&core=true", \
-  "--saturn-logger", "https://twb3qukm2i654i3tnvx36char40aymqq.lambda-url.us-west-2.on.aws", \
-  "--kubo-rpc", "https://node0.delegate.ipfs.io", "--kubo-rpc", "https://node1.delegate.ipfs.io", "--kubo-rpc", "https://node2.delegate.ipfs.io", "--kubo-rpc", "https://node3.delegate.ipfs.io", \
-  "--gateway-port", "8081", \
-  "--metrics-port", "8041" \
-]
+CMD ["--gateway-port", "8081", "--metrics-port", "8041"]
