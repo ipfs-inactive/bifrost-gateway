@@ -32,11 +32,11 @@ const (
 	EnvSaturnLogger       = "STRN_LOGGER_URL"
 	EnvSaturnOrchestrator = "STRN_ORCHESTRATOR_URL"
 	EnvBlockCacheSize     = "BLOCK_CACHE_SIZE"
-	EnvKuboRPC            = "KUBO_RPC_URLS"
+	EnvKuboRPC            = "KUBO_RPC_URL"
 )
 
 func init() {
-	rootCmd.Flags().Int("gateway-port", 8080, "gateway port")
+	rootCmd.Flags().Int("gateway-port", 8081, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8040, "metrics port")
 
 	rootCmd.MarkFlagRequired("saturn-orchestrator")
@@ -49,6 +49,8 @@ var rootCmd = &cobra.Command{
 	Version:           version,
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	Short:             "IPFS Gateway implementation for https://github.com/protocol/bifrost-infra",
+	Long: `bifrost-gateway provides HTTP Gateway backed by a remote blockstore.
+See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get flags.
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")
