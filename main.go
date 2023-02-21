@@ -37,7 +37,7 @@ const (
 
 func init() {
 	rootCmd.Flags().Int("gateway-port", 8081, "gateway port")
-	rootCmd.Flags().Int("metrics-port", 8040, "metrics port")
+	rootCmd.Flags().Int("metrics-port", 8041, "metrics port")
 
 	rootCmd.MarkFlagRequired("saturn-orchestrator")
 	rootCmd.MarkFlagRequired("saturn-logger")
