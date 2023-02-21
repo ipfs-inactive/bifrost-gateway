@@ -39,9 +39,9 @@ func withRequestLogger(next http.Handler) http.Handler {
 	})
 }
 
-func makeGatewayHandler(saturnOrchestrator, saturnLogger string, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS) (*http.Server, error) {
-	// Sets up an exchange based on using Saturn as block storage
-	exch, err := newExchange(saturnOrchestrator, saturnLogger, cdns)
+func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int) (*http.Server, error) {
+	// Sets up an exchange based on the given Block Store
+	exch, err := newExchange(bs)
 	if err != nil {
 		return nil, err
 	}

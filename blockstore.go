@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/ipfs/go-cid"
@@ -11,14 +12,12 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
+var errNotImplemented = errors.New("not implemented")
+
 const GetBlockTimeout = time.Second * 60
 
-func newExchange(orchestrator, loggingEndpoint string, cdns *cachedDNS) (exchange.Interface, error) {
-	b, err := newCabooseBlockStore(orchestrator, loggingEndpoint, cdns)
-	if err != nil {
-		return nil, err
-	}
-	return &exchangeBsWrapper{bstore: b}, nil
+func newExchange(bs blockstore.Blockstore) (exchange.Interface, error) {
+	return &exchangeBsWrapper{bstore: bs}, nil
 }
 
 type exchangeBsWrapper struct {
@@ -30,7 +29,7 @@ func (e *exchangeBsWrapper) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 	defer cancel()
 
 	if goLog.Level().Enabled(zapcore.DebugLevel) {
-		goLog.Debugw("block requested from strn", "cid", c.String())
+		goLog.Debugw("block requested from remote blockstore", "cid", c.String())
 	}
 
 	return e.bstore.Get(ctx, c)
