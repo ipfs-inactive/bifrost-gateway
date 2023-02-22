@@ -69,7 +69,7 @@ func (e *exchangeBsWrapper) Close() error {
 func wrapRemoteError(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) ||
 		// Unfortunately this is not an exported type so we have to check for the content.
-		strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") {
+		strings.Contains(err.Error(), "Client.Timeout exceeded") {
 		return fmt.Errorf("%w: %s", gateway.ErrGatewayTimeout, err.Error())
 	} else {
 		return fmt.Errorf("%w: %s", gateway.ErrBadGateway, err.Error())
