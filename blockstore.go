@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
 	blocks "github.com/ipfs/go-libipfs/blocks"
+	"github.com/ipfs/go-libipfs/gateway"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -32,7 +35,11 @@ func (e *exchangeBsWrapper) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 		goLog.Debugw("block requested from remote blockstore", "cid", c.String())
 	}
 
-	return e.bstore.Get(ctx, c)
+	blk, err := e.bstore.Get(ctx, c)
+	if err != nil {
+		return nil, wrapRemoteError(err)
+	}
+	return blk, nil
 }
 
 func (e *exchangeBsWrapper) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
@@ -57,6 +64,16 @@ func (e *exchangeBsWrapper) NotifyNewBlocks(ctx context.Context, blks ...blocks.
 
 func (e *exchangeBsWrapper) Close() error {
 	return nil
+}
+
+func wrapRemoteError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) ||
+		// Unfortunately this is not an exported type so we have to check for the content.
+		strings.Contains(err.Error(), "Client.Timeout exceeded while awaiting headers") {
+		return fmt.Errorf("%w: %s", gateway.ErrGatewayTimeout, err.Error())
+	} else {
+		return fmt.Errorf("%w: %s", gateway.ErrBadGateway, err.Error())
+	}
 }
 
 var _ exchange.Interface = (*exchangeBsWrapper)(nil)
