@@ -8,6 +8,7 @@ import (
 
 	"github.com/filecoin-saturn/caboose"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	"github.com/ipfs/go-libipfs/gateway"
 )
 
 func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS) (blockstore.Blockstore, error) {
@@ -79,5 +80,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		DoValidation: true,
 		PoolRefresh:  5 * time.Minute,
 		SaturnClient: saturnRetrievalClient,
+
+		AffinityKey: gateway.ContentPathKey,
 	})
 }
