@@ -3,7 +3,7 @@ module github.com/ipfs/bifrost-gateway
 go 1.19
 
 require (
-	github.com/filecoin-saturn/caboose v0.0.0-20230221130251-6fde8093865c
+	github.com/filecoin-saturn/caboose v0.0.0-20230224143717-684691e6737d
 	github.com/gogo/protobuf v1.3.2
 	github.com/hashicorp/golang-lru/v2 v2.0.1
 	github.com/ipfs/go-blockservice v0.5.0
@@ -13,14 +13,14 @@ require (
 	github.com/ipfs/go-ipfs-exchange-interface v0.2.0
 	github.com/ipfs/go-ipld-format v0.4.0
 	github.com/ipfs/go-ipns v0.3.0
-	github.com/ipfs/go-libipfs v0.5.1-0.20230215002322-e7aa6a184deb
+	github.com/ipfs/go-libipfs v0.6.1-0.20230224134131-7ba1df55d53b
 	github.com/ipfs/go-log/v2 v2.5.1
 	github.com/ipfs/go-merkledag v0.9.0
 	github.com/ipfs/go-namesys v0.7.0
 	github.com/ipfs/go-path v0.3.0
 	github.com/ipfs/go-unixfs v0.3.1
 	github.com/ipfs/go-unixfsnode v1.5.1
-	github.com/ipfs/interface-go-ipfs-core v0.10.0
+	github.com/ipfs/interface-go-ipfs-core v0.11.1
 	github.com/ipld/go-codec-dagpb v1.5.0
 	github.com/ipld/go-ipld-prime v0.19.0
 	github.com/libp2p/go-libp2p v0.25.1
