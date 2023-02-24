@@ -130,6 +130,8 @@ github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
 github.com/filecoin-saturn/caboose v0.0.0-20230224175506-a1f20de5ba9e h1:w1OU35CiszRqN82Vu2fsrIOXZ30sZ3sKuuwTVtM8JmI=
 github.com/filecoin-saturn/caboose v0.0.0-20230224175506-a1f20de5ba9e/go.mod h1:8r461tw36fg57kfCPGILFE0bWRodig93n0F1S90VIVg=
+github.com/filecoin-saturn/caboose v0.0.0-20230224232424-4d422acaabd3 h1:IaZ7e1MVHk8KNUwe8I2i4chOoDN8oT5loYzqwUiX0cc=
+github.com/filecoin-saturn/caboose v0.0.0-20230224232424-4d422acaabd3/go.mod h1:8r461tw36fg57kfCPGILFE0bWRodig93n0F1S90VIVg=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
 github.com/flynn/noise v1.0.0 h1:DlTHqmzmvcEiKj+4RYo/imoswx/4r6iBlCMfVtrMXpQ=
 github.com/flynn/noise v1.0.0/go.mod h1:xbMo+0i6+IGbYdJhF31t2eR1BIU0CYc12+BNAKwUTag=
