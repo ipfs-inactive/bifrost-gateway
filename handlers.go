@@ -34,7 +34,8 @@ func makeMetricsHandler(port int) (*http.Server, error) {
 
 func withRequestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		goLog.Infow("request received", "url", r.URL, "method", r.Method)
+		goLog.Infow(r.Method, "url", r.URL, "host", r.Host)
+		// TODO: if debug is enabled, show more? goLog.Infow("request received", "url", r.URL, "host", r.Host, "method", r.Method, "ua", r.UserAgent(), "referer", r.Referer())
 		next.ServeHTTP(w, r)
 	})
 }
