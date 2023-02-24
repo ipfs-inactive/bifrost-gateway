@@ -28,15 +28,23 @@ type proxyRouting struct {
 	rand       *rand.Rand
 }
 
-func newProxyRouting(kuboRPC []string) routing.ValueStore {
+func newProxyRouting(kuboRPC []string, cdns *cachedDNS) routing.ValueStore {
 	s := rand.NewSource(time.Now().Unix())
 	rand := rand.New(s)
 
 	return &proxyRouting{
 		kuboRPC: kuboRPC,
 		httpClient: &http.Client{
-			Transport: &withUserAgent{
-				RoundTripper: http.DefaultTransport,
+			Transport: &customTransport{
+				// Roundtripper with increased defaults than http.Transport such that retrieving
+				// multiple lookups concurrently is fast.
+				RoundTripper: &http.Transport{
+					MaxIdleConns:        1000,
+					MaxConnsPerHost:     100,
+					MaxIdleConnsPerHost: 100,
+					IdleConnTimeout:     90 * time.Second,
+					DialContext:         cdns.dialWithCachedDNS,
+				},
 			},
 		},
 		rand: rand,

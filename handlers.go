@@ -40,7 +40,7 @@ func withRequestLogger(next http.Handler) http.Handler {
 	})
 }
 
-func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int) (*http.Server, error) {
+func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS) (*http.Server, error) {
 	// Sets up an exchange based on the given Block Store
 	exch, err := newExchange(bs)
 	if err != nil {
@@ -60,7 +60,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	blockService := blockservice.New(cacheBlockStore, exch)
 
 	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
-	routing := newProxyRouting(kuboRPC)
+	routing := newProxyRouting(kuboRPC, cdns)
 
 	// Creates the gateway with the block service and the routing.
 	gwAPI, err := newBifrostGateway(blockService, routing)

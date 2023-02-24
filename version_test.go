@@ -10,7 +10,7 @@ import (
 
 func TestWithUserAgent(t *testing.T) {
 	client := &http.Client{
-		Transport: &withUserAgent{
+		Transport: &customTransport{
 			RoundTripper: http.DefaultTransport,
 		},
 	}
