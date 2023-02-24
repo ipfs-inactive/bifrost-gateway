@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	exchange "github.com/ipfs/go-ipfs-exchange-interface"
@@ -37,7 +38,7 @@ func (e *exchangeBsWrapper) GetBlock(ctx context.Context, c cid.Cid) (blocks.Blo
 
 	blk, err := e.bstore.Get(ctx, c)
 	if err != nil {
-		return nil, wrapRemoteError(err)
+		return nil, gatewayError(err)
 	}
 	return blk, nil
 }
@@ -66,14 +67,23 @@ func (e *exchangeBsWrapper) Close() error {
 	return nil
 }
 
-func wrapRemoteError(err error) error {
+// gatewayError translates underlying blockstore error into one that gateway code will return as HTTP 502 or 504
+func gatewayError(err error) error {
+	if errors.Is(err, gateway.ErrGatewayTimeout) || errors.Is(err, gateway.ErrBadGateway) {
+		// already correct error
+		return err
+	}
+
+	// All timeouts should produce 504 Gateway Timeout
 	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, caboose.ErrSaturnTimeout) ||
 		// Unfortunately this is not an exported type so we have to check for the content.
 		strings.Contains(err.Error(), "Client.Timeout exceeded") {
 		return fmt.Errorf("%w: %s", gateway.ErrGatewayTimeout, err.Error())
-	} else {
-		return fmt.Errorf("%w: %s", gateway.ErrBadGateway, err.Error())
 	}
+
+	// everything else returns 502 Bad Gateway
+	return fmt.Errorf("%w: %s", gateway.ErrBadGateway, err.Error())
 }
 
 var _ exchange.Interface = (*exchangeBsWrapper)(nil)
