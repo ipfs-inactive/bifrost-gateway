@@ -27,10 +27,6 @@ func main() {
 }
 
 const (
-	DefaultSaturnLogger = "https://logs.strn.network"
-	DefaultProxyGateway = "http://127.0.0.1:8080"
-	DefaultKuboPRC      = "http://127.0.0.1:8080"
-
 	EnvSaturnLogger       = "STRN_LOGGER_URL"
 	EnvSaturnOrchestrator = "STRN_ORCHESTRATOR_URL"
 	EnvProxyGateway       = "PROXY_GATEWAY_URL"
@@ -42,9 +38,6 @@ func init() {
 	rootCmd.Flags().Int("gateway-port", 8081, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8041, "metrics port")
 
-	rootCmd.MarkFlagRequired("saturn-orchestrator")
-	rootCmd.MarkFlagRequired("saturn-logger")
-	rootCmd.MarkFlagRequired("kubo-rpc")
 }
 
 var rootCmd = &cobra.Command{
@@ -61,8 +54,7 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 
 		// Get env variables.
 		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, "")
-		saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
-		proxyGateway := getEnvs(EnvProxyGateway, DefaultProxyGateway)
+		proxyGateway := getEnvs(EnvProxyGateway, "")
 		kuboRPC := getEnvs(EnvKuboRPC, DefaultKuboPRC)
 
 		blockCacheSize, err := getEnvInt(EnvBlockCacheSize, DefaultCacheBlockStoreSize)
@@ -78,16 +70,17 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		var bs blockstore.Blockstore
 
 		if saturnOrchestrator != "" {
-			log.Printf("Proxying gateway block requests to Saturn at %s", saturnOrchestrator)
+			log.Printf("Saturn backend (STRN_ORCHESTRATOR_URL) at %s", saturnOrchestrator)
+			saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
 			bs, err = newCabooseBlockStore(saturnOrchestrator, saturnLogger, cdns)
 			if err != nil {
 				return err
 			}
 		} else if len(proxyGateway) != 0 {
-			log.Printf("Proxying gateway block requests to %s", strings.Join(proxyGateway, " "))
+			log.Printf("Proxy backend (PROXY_GATEWAY_URL) at %s", strings.Join(proxyGateway, " "))
 			bs = newProxyBlockStore(proxyGateway, cdns)
 		} else {
-			return errors.New("neither saturn orchestrator or proxy gateway are configured")
+			log.Fatalf("Unable to start. bifrost-gateway requires either PROXY_GATEWAY_URL or STRN_ORCHESTRATOR_URL to be set.\n\nRead docs at https://github.com/ipfs/bifrost-gateway/blob/main/docs/environment-variables.md\n\n")
 		}
 
 		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize)
@@ -107,8 +100,8 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		go func() {
 			defer wg.Done()
 
-			log.Printf("Block cache size: %d", blockCacheSize)
-			log.Printf("Legacy RPC at /api/v0 provided by %s", strings.Join(kuboRPC, " "))
+			log.Printf("%s: %d", EnvBlockCacheSize, blockCacheSize)
+			log.Printf("Legacy RPC at /api/v0 (%s) provided by %s", EnvKuboRPC, strings.Join(kuboRPC, " "))
 			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
 			log.Printf("Subdomain gateway configured on dweb.link and http://localhost:%d", gatewayPort)
 			log.Printf("Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
@@ -151,6 +144,9 @@ func getEnv(key, defaultValue string) string {
 func getEnvs(key, defaultValue string) []string {
 	value := os.Getenv(key)
 	if value == "" {
+		if defaultValue == "" {
+			return []string{}
+		}
 		value = defaultValue
 	}
 	value = strings.TrimSpace(value)

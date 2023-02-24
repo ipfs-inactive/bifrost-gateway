@@ -10,6 +10,8 @@ import (
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 )
 
+const DefaultSaturnLogger = "http://set-STRN_LOGGER_URL"
+
 func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS) (blockstore.Blockstore, error) {
 	var (
 		orchURL *url.URL

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -12,6 +13,17 @@ import (
 	"github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	"github.com/ipfs/go-libipfs/blocks"
+)
+
+// Blockstore backed by a verifiable gateway. This is vendor-agnostic proxy interface,
+// one can use Gateway provided by Kubo, or any other implementation that follows
+// the spec for verifiable responses:
+// https://docs.ipfs.tech/reference/http/gateway/#trustless-verifiable-retrieval
+// https://github.com/ipfs/specs/blob/main/http-gateways/TRUSTLESS_GATEWAY.md
+
+const (
+	DefaultProxyGateway = "http://127.0.0.1:8080"
+	DefaultKuboPRC      = "http://127.0.0.1:5001"
 )
 
 type proxyBlockStore struct {
@@ -24,6 +36,10 @@ type proxyBlockStore struct {
 func newProxyBlockStore(gatewayURL []string, cdns *cachedDNS) blockstore.Blockstore {
 	s := rand.NewSource(time.Now().Unix())
 	rand := rand.New(s)
+
+	if len(gatewayURL) == 0 {
+		log.Fatal("Missing PROXY_GATEWAY_URL. See https://github.com/ipfs/bifrost-gateway/blob/main/docs/environment-variables.md")
+	}
 
 	return &proxyBlockStore{
 		gatewayURL: gatewayURL,

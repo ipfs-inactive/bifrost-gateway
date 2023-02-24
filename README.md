@@ -10,17 +10,42 @@ Local build:
 
 ```console
 $ go build
-$ ./bifrost-gateway --help
+$ ./bifrost-gateway
 ```
 
-Prebuild Docker image:
+### Docker
 
 ```console
 $ docker pull ipfs/bifrost-gateway:main-latest
-$ docker run --rm -it --net=host ipfs/bifrost-gateway:main-latest --help
+$ docker run --rm -it --net=host ipfs/bifrost-gateway:main-latest
 ```
 
+When using Docker, make sure to pass necessary config via  [`./docs/environment-variables.md`](./docs/environment-variables.md).
+
 List of available revisions: https://hub.docker.com/r/ipfs/bifrost-gateway/tags
+
+### How to run with Saturn CDN backend
+
+[Saturn](https://strn.network) is an open-source, community-run Content Delivery Network (CDN).
+`bifrost-gateway` supports it via the [Caboose](https://github.com/filecoin-saturn/caboose) backend,
+which takes care of discovering and evaluating Saturn CDN peers.
+
+See [_Saturn Backend_ in `./docs/environment-variables.md`](./docs/environment-variables.md#saturn-backend)
+
+### How to run with local gateway
+
+Saturn is implementation detail specific to ipfs.io infrastructure.
+One can run `bifrost-gateway` without it. All you need is endpoint that supports
+[verifiable response types](https://docs.ipfs.tech/reference/http/gateway/#trustless-verifiable-retrieval).
+
+To run without Saturn and use Gateway provided by a local IPFS node like [Kubo](https://github.com/ipfs/kubo):
+
+```console
+$ PROXY_GATEWAY_URL="http://127.0.0.1:8080" ./bifrost-gateway
+```
+
+See [_Proxy Backend_ in `./docs/environment-variables.md`](./docs/environment-variables.md#proxy-backend)
+
 
 ### How to debug?
 
