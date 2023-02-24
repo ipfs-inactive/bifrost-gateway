@@ -80,10 +80,7 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err e
 
 	key = "/ipns/" + peer.ToCid(id).String()
 
-	// Naively choose one of the Kubo RPC clients.
-	endpoint := ps.kuboRPC[rand.Intn(len(ps.kuboRPC))]
-
-	u, err := url.Parse(fmt.Sprintf("%s/api/v0/dht/get?arg=%s", endpoint, key))
+	u, err := url.Parse(fmt.Sprintf("%s/api/v0/dht/get?arg=%s", ps.getRandomKuboURL(), key))
 	if err != nil {
 		return nil, err
 	}
@@ -162,4 +159,8 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err e
 	}
 
 	return rb, nil
+}
+
+func (ps *proxyRouting) getRandomKuboURL() string {
+	return ps.kuboRPC[ps.rand.Intn(len(ps.kuboRPC))]
 }

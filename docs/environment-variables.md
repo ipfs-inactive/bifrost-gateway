@@ -6,6 +6,7 @@
   - [`KUBO_RPC_URL`](#kubo_rpc_url)
   - [`BLOCK_CACHE_SIZE`](#block_cache_size)
 - [Proxy Backend](#proxy-backend)
+  - [`PROXY_GATEWAY_URL`](#proxy_gateway_url)
 - [Saturn Backend](#saturn-backend)
   - [`STRN_ORCHESTRATOR_URL`](#strn_orchestrator_url)
   - [`STRN_LOGGER_URL`](#strn_logger_url)
@@ -32,8 +33,11 @@ The size of in-memory [2Q cache](https://pkg.go.dev/github.com/hashicorp/golang-
 
 ## Proxy Backend
 
-TODO: this will be the default backend used when `STRN_ORCHESTRATOR_URL` is not set.
-We will have env variable that allows customizing URL of HTTP Gateway that supports Block/CAR responses.
+### `PROXY_GATEWAY_URL`
+
+Single URL or a comma separated list of Gateway endpoints that support `?format=block|car`
+responses. This is used by default with `http://127.0.0.1:8080` unless `STRN_ORCHESTRATOR_URL`
+is set.
 
 ## Saturn Backend
 

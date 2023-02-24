@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 )
@@ -26,22 +27,17 @@ func main() {
 }
 
 const (
-	DefaultSaturnLogger       = "https://logs.strn.network"
-	DefaultSaturnOrchestrator = "https://orchestrator.strn.pl/nodes/nearby"
-
 	EnvSaturnLogger       = "STRN_LOGGER_URL"
 	EnvSaturnOrchestrator = "STRN_ORCHESTRATOR_URL"
-	EnvBlockCacheSize     = "BLOCK_CACHE_SIZE"
+	EnvProxyGateway       = "PROXY_GATEWAY_URL"
 	EnvKuboRPC            = "KUBO_RPC_URL"
+	EnvBlockCacheSize     = "BLOCK_CACHE_SIZE"
 )
 
 func init() {
 	rootCmd.Flags().Int("gateway-port", 8081, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8041, "metrics port")
 
-	rootCmd.MarkFlagRequired("saturn-orchestrator")
-	rootCmd.MarkFlagRequired("saturn-logger")
-	rootCmd.MarkFlagRequired("kubo-rpc")
 }
 
 var rootCmd = &cobra.Command{
@@ -57,9 +53,10 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
 
 		// Get env variables.
-		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, DefaultSaturnOrchestrator)
-		saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
-		kuboRPC := strings.Split(os.Getenv(EnvKuboRPC), ",")
+		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, "")
+		proxyGateway := getEnvs(EnvProxyGateway, "")
+		kuboRPC := getEnvs(EnvKuboRPC, DefaultKuboPRC)
+
 		blockCacheSize, err := getEnvInt(EnvBlockCacheSize, DefaultCacheBlockStoreSize)
 		if err != nil {
 			return err
@@ -70,7 +67,23 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		cdns := newCachedDNS(dnsCacheRefreshInterval)
 		defer cdns.Close()
 
-		gatewaySrv, err := makeGatewayHandler(saturnOrchestrator, saturnLogger, kuboRPC, gatewayPort, blockCacheSize, cdns)
+		var bs blockstore.Blockstore
+
+		if saturnOrchestrator != "" {
+			log.Printf("Saturn backend (STRN_ORCHESTRATOR_URL) at %s", saturnOrchestrator)
+			saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
+			bs, err = newCabooseBlockStore(saturnOrchestrator, saturnLogger, cdns)
+			if err != nil {
+				return err
+			}
+		} else if len(proxyGateway) != 0 {
+			log.Printf("Proxy backend (PROXY_GATEWAY_URL) at %s", strings.Join(proxyGateway, " "))
+			bs = newProxyBlockStore(proxyGateway, cdns)
+		} else {
+			log.Fatalf("Unable to start. bifrost-gateway requires either PROXY_GATEWAY_URL or STRN_ORCHESTRATOR_URL to be set.\n\nRead docs at https://github.com/ipfs/bifrost-gateway/blob/main/docs/environment-variables.md\n\n")
+		}
+
+		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize)
 		if err != nil {
 			return err
 		}
@@ -87,8 +100,8 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		go func() {
 			defer wg.Done()
 
-			log.Printf("Block cache size: %d", blockCacheSize)
-			log.Printf("Legacy RPC at /api/v0 provided by %s", strings.Join(kuboRPC, " "))
+			log.Printf("%s: %d", EnvBlockCacheSize, blockCacheSize)
+			log.Printf("Legacy RPC at /api/v0 (%s) provided by %s", EnvKuboRPC, strings.Join(kuboRPC, " "))
 			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
 			log.Printf("Subdomain gateway configured on dweb.link and http://localhost:%d", gatewayPort)
 			log.Printf("Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
@@ -126,6 +139,18 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+func getEnvs(key, defaultValue string) []string {
+	value := os.Getenv(key)
+	if value == "" {
+		if defaultValue == "" {
+			return []string{}
+		}
+		value = defaultValue
+	}
+	value = strings.TrimSpace(value)
+	return strings.Split(value, ",")
 }
 
 func getEnvInt(key string, defaultValue int) (int, error) {
