@@ -4,13 +4,20 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
 	"github.com/filecoin-saturn/caboose"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 )
 
-const DefaultSaturnLogger = "http://set-STRN_LOGGER_URL"
+const (
+	EnvSaturnLogger       = "STRN_LOGGER_URL"
+	EnvSaturnLoggerSecret = "STRN_LOGGER_SECRET"
+	EnvSaturnOrchestrator = "STRN_ORCHESTRATOR_URL"
+
+	DefaultSaturnLogger = "http://set-env-variables-STRN_LOGGER_URL-and-STRN_LOGGER_SECRET"
+)
 
 func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS) (blockstore.Blockstore, error) {
 	var (
@@ -33,9 +40,19 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		}
 	}
 
-	saturnServiceClient := &http.Client{
+	saturnOrchestratorClient := &http.Client{
 		Timeout: caboose.DefaultSaturnRequestTimeout,
-		Transport: &withUserAgent{
+		Transport: &customTransport{
+			RoundTripper: &http.Transport{
+				DialContext: cdns.dialWithCachedDNS,
+			},
+		},
+	}
+
+	saturnLoggerClient := &http.Client{
+		Timeout: caboose.DefaultSaturnRequestTimeout,
+		Transport: &customTransport{
+			AuthorizationBearerToken: os.Getenv(EnvSaturnLoggerSecret),
 			RoundTripper: &http.Transport{
 				DialContext: cdns.dialWithCachedDNS,
 			},
@@ -44,7 +61,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 
 	saturnRetrievalClient := &http.Client{
 		Timeout: caboose.DefaultSaturnRequestTimeout,
-		Transport: &withUserAgent{
+		Transport: &customTransport{
 			RoundTripper: &http.Transport{
 				// Increasing concurrency defaults from http.DefaultTransport
 				MaxIdleConns:        1000,
@@ -72,10 +89,10 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 
 	return caboose.NewCaboose(&caboose.Config{
 		OrchestratorEndpoint: orchURL,
-		OrchestratorClient:   saturnServiceClient,
+		OrchestratorClient:   saturnOrchestratorClient,
 
 		LoggingEndpoint: *loggURL,
-		LoggingClient:   saturnServiceClient,
+		LoggingClient:   saturnLoggerClient,
 		LoggingInterval: 5 * time.Second,
 
 		DoValidation: true,

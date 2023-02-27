@@ -27,11 +27,8 @@ func main() {
 }
 
 const (
-	EnvSaturnLogger       = "STRN_LOGGER_URL"
-	EnvSaturnOrchestrator = "STRN_ORCHESTRATOR_URL"
-	EnvProxyGateway       = "PROXY_GATEWAY_URL"
-	EnvKuboRPC            = "KUBO_RPC_URL"
-	EnvBlockCacheSize     = "BLOCK_CACHE_SIZE"
+	EnvKuboRPC        = "KUBO_RPC_URL"
+	EnvBlockCacheSize = "BLOCK_CACHE_SIZE"
 )
 
 func init() {
@@ -70,8 +67,14 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		var bs blockstore.Blockstore
 
 		if saturnOrchestrator != "" {
-			log.Printf("Saturn backend (STRN_ORCHESTRATOR_URL) at %s", saturnOrchestrator)
 			saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
+			log.Printf("Saturn backend (%s) at %s", EnvSaturnOrchestrator, saturnOrchestrator)
+			log.Printf("Saturn logger  (%s) at %s", EnvSaturnLogger, saturnLogger)
+			if os.Getenv(EnvSaturnLoggerSecret) == "" {
+				log.Printf("")
+				log.Printf("  WARNING: %s is not set", EnvSaturnLoggerSecret)
+				log.Printf("")
+			}
 			bs, err = newCabooseBlockStore(saturnOrchestrator, saturnLogger, cdns)
 			if err != nil {
 				return err
@@ -83,7 +86,7 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 			log.Fatalf("Unable to start. bifrost-gateway requires either PROXY_GATEWAY_URL or STRN_ORCHESTRATOR_URL to be set.\n\nRead docs at https://github.com/ipfs/bifrost-gateway/blob/main/docs/environment-variables.md\n\n")
 		}
 
-		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize)
+		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize, cdns)
 		if err != nil {
 			return err
 		}
@@ -103,9 +106,9 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 			log.Printf("%s: %d", EnvBlockCacheSize, blockCacheSize)
 			log.Printf("Legacy RPC at /api/v0 (%s) provided by %s", EnvKuboRPC, strings.Join(kuboRPC, " "))
 			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
+			log.Printf("  Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
 			log.Printf("Subdomain gateway configured on dweb.link and http://localhost:%d", gatewayPort)
-			log.Printf("Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
-			log.Printf("Smoke test (Subdomain+DNSLink+UnixFS+HAMT): http://localhost:%d/ipns/en.wikipedia-on-ipfs.org/wiki/", gatewayPort)
+			log.Printf("  Smoke test (Subdomain+DNSLink+UnixFS+HAMT): http://localhost:%d/ipns/en.wikipedia-on-ipfs.org/wiki/", gatewayPort)
 			err := gatewaySrv.ListenAndServe()
 			if err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Printf("Failed to start gateway: %s", err)

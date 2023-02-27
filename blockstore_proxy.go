@@ -22,6 +22,8 @@ import (
 // https://github.com/ipfs/specs/blob/main/http-gateways/TRUSTLESS_GATEWAY.md
 
 const (
+	EnvProxyGateway = "PROXY_GATEWAY_URL"
+
 	DefaultProxyGateway = "http://127.0.0.1:8080"
 	DefaultKuboPRC      = "http://127.0.0.1:5001"
 )
@@ -45,7 +47,7 @@ func newProxyBlockStore(gatewayURL []string, cdns *cachedDNS) blockstore.Blockst
 		gatewayURL: gatewayURL,
 		httpClient: &http.Client{
 			Timeout: GetBlockTimeout,
-			Transport: &withUserAgent{
+			Transport: &customTransport{
 				// Roundtripper with increased defaults than http.Transport such that retrieving
 				// multiple blocks from a single gateway concurrently is fast.
 				RoundTripper: &http.Transport{

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/http"
 	"runtime/debug"
 	"time"
 )
@@ -37,13 +36,4 @@ func buildVersion() string {
 		return day + "-" + revision
 	}
 	return "dev-build"
-}
-
-type withUserAgent struct {
-	http.RoundTripper
-}
-
-func (adt *withUserAgent) RoundTrip(req *http.Request) (*http.Response, error) {
-	req.Header.Add("User-Agent", userAgent)
-	return adt.RoundTripper.RoundTrip(req)
 }

@@ -51,7 +51,8 @@ Saturn Logger used for fraud detection.
 
 ### `STRN_LOGGER_SECRET`
 
-TODO [bifrost-gateway/issues/43](https://github.com/ipfs/bifrost-gateway/issues/43): Saturn Logger JWT used for fraud detection.
+JWT token provided by Saturn CDN. Staging (testnet) and production (mainnet)
+should use different tokens.
 
 ## Logging
 
