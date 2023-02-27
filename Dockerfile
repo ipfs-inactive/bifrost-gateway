@@ -44,7 +44,6 @@ MAINTAINER IPFS Stewards <w3dt-stewards-ip@protocol.ai>
 ENV GOPATH                 /go
 ENV SRC_PATH               /go/src/github.com/ipfs/bifrost-gateway
 ENV BIFROST_GATEWAY_PATH   /data/bifrost-gateway
-ENV STRN_ORCHESTRATOR_URL  https://orchestrator.strn.pl/nodes/nearby?count=1000&core=true
 ENV KUBO_RPC_URL           https://node0.delegate.ipfs.io,https://node1.delegate.ipfs.io,https://node2.delegate.ipfs.io,https://node3.delegate.ipfs.io
 
 COPY --from=builder $GOPATH/bin/bifrost-gateway /usr/local/bin/bifrost-gateway
