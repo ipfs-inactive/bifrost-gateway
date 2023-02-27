@@ -24,3 +24,24 @@ func TestWithUserAgent(t *testing.T) {
 	_, err := client.Get(ts.URL)
 	assert.Nil(t, err)
 }
+
+func TestWithAuthorizationBearerToken(t *testing.T) {
+	secret := "secret"
+
+	client := &http.Client{
+		Transport: &customTransport{
+			AuthorizationBearerToken: secret,
+			RoundTripper:             http.DefaultTransport,
+		},
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		assert.EqualValues(t, auth, "Bearer "+secret)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	_, err := client.Get(ts.URL)
+	assert.Nil(t, err)
+}
