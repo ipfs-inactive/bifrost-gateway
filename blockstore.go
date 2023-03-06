@@ -68,8 +68,10 @@ func (e *exchangeBsWrapper) Close() error {
 }
 
 // gatewayError translates underlying blockstore error into one that gateway code will return as HTTP 502 or 504
+// it also makes sure Retry-After hint from remote blockstore will be passed to HTTP client, if present.
 func gatewayError(err error) error {
-	if errors.Is(err, gateway.ErrGatewayTimeout) || errors.Is(err, gateway.ErrBadGateway) {
+	if errors.Is(err, &gateway.ErrorResponse{}) ||
+		errors.Is(err, &gateway.ErrorRetryAfter{}) {
 		// already correct error
 		return err
 	}
@@ -80,6 +82,16 @@ func gatewayError(err error) error {
 		// Unfortunately this is not an exported type so we have to check for the content.
 		strings.Contains(err.Error(), "Client.Timeout exceeded") {
 		return fmt.Errorf("%w: %s", gateway.ErrGatewayTimeout, err.Error())
+	}
+
+	// Saturn errors with RetryAfter hint need to be converted to Gateway ones
+	var saturnTooManyRequests *caboose.ErrSaturnTooManyRequests
+	if errors.As(err, &saturnTooManyRequests) {
+		return gateway.NewErrorRetryAfter(saturnTooManyRequests, saturnTooManyRequests.RetryAfter)
+	}
+	var saturnCidCoolDown *caboose.ErrCidCoolDown
+	if errors.As(err, &saturnCidCoolDown) {
+		return gateway.NewErrorRetryAfter(saturnCidCoolDown, saturnCidCoolDown.RetryAfter)
 	}
 
 	// everything else returns 502 Bad Gateway
