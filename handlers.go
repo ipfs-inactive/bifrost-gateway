@@ -63,7 +63,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	routing := newProxyRouting(kuboRPC, cdns)
 
 	// Creates the gateway with the block service and the routing.
-	gwAPI, err := newBifrostGateway(blockService, routing)
+	gwAPI, err := gateway.NewBlocksGateway(blockService, gateway.WithValueStore(routing))
 	if err != nil {
 		return nil, err
 	}
