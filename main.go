@@ -12,7 +12,7 @@ import (
 	"strings"
 	"sync"
 
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	blockstore "github.com/ipfs/boxo/blockstore"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
 )

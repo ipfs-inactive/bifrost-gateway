@@ -8,11 +8,11 @@ import (
 	"time"
 
 	"github.com/filecoin-saturn/caboose"
+	blockstore "github.com/ipfs/boxo/blockstore"
+	exchange "github.com/ipfs/boxo/exchange"
+	"github.com/ipfs/boxo/gateway"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	exchange "github.com/ipfs/go-ipfs-exchange-interface"
-	blocks "github.com/ipfs/go-libipfs/blocks"
-	"github.com/ipfs/go-libipfs/gateway"
 	"go.uber.org/zap/zapcore"
 )
 

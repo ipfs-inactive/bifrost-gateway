@@ -9,10 +9,10 @@ import (
 	"time"
 
 	"github.com/filecoin-saturn/caboose"
-	"github.com/ipfs/go-blockservice"
-	bstore "github.com/ipfs/go-ipfs-blockstore"
-	"github.com/ipfs/go-libipfs/gateway"
-	"github.com/ipfs/interface-go-ipfs-core/path"
+	"github.com/ipfs/boxo/blockservice"
+	bstore "github.com/ipfs/boxo/blockstore"
+	"github.com/ipfs/boxo/coreiface/path"
+	"github.com/ipfs/boxo/gateway"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -78,7 +78,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	routing := newProxyRouting(kuboRPC, cdns)
 
 	// Creates the gateway with the block service and the routing.
-	gwAPI, err := newBifrostGateway(blockService, routing)
+	gwAPI, err := gateway.NewBlocksGateway(blockService, gateway.WithValueStore(routing))
 	if err != nil {
 		return nil, err
 	}
