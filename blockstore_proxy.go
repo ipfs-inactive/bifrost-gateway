@@ -10,9 +10,9 @@ import (
 	"net/url"
 	"time"
 
+	blockstore "github.com/ipfs/boxo/blockstore"
+	"github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	"github.com/ipfs/go-libipfs/blocks"
 )
 
 // Blockstore backed by a verifiable gateway. This is vendor-agnostic proxy interface,

@@ -7,8 +7,8 @@ import (
 	format "github.com/ipfs/go-ipld-format"
 	"github.com/prometheus/client_golang/prometheus"
 
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	"github.com/ipfs/go-libipfs/blocks"
+	blockstore "github.com/ipfs/boxo/blockstore"
+	"github.com/ipfs/go-block-format"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	uatomic "go.uber.org/atomic"
