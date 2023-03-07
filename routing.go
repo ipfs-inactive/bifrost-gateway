@@ -109,13 +109,13 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err e
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("routing/get RPC returned unexpected status: %s", resp.Status)
-	}
-
 	rb, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("routing/get RPC returned unexpected status: %s, body: %s", resp.Status, string(rb))
 	}
 
 	parts := bytes.Split(bytes.TrimSpace(rb), []byte("\n"))
