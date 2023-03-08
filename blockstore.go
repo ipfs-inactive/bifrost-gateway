@@ -84,14 +84,12 @@ func gatewayError(err error) error {
 		return fmt.Errorf("%w: %s", gateway.ErrGatewayTimeout, err.Error())
 	}
 
-	// Saturn errors with RetryAfter hint need to be converted to Gateway ones
-	var saturnTooManyRequests *caboose.ErrSaturnTooManyRequests
-	if errors.As(err, &saturnTooManyRequests) {
-		return gateway.NewErrorRetryAfter(saturnTooManyRequests, saturnTooManyRequests.RetryAfter)
-	}
-	var saturnCidCoolDown *caboose.ErrCidCoolDown
-	if errors.As(err, &saturnCidCoolDown) {
-		return gateway.NewErrorRetryAfter(saturnCidCoolDown, saturnCidCoolDown.RetryAfter)
+	// (Saturn) errors that support the RetryAfter interface need to be converted
+	// to the correct gateway error, such that the HTTP header is set.
+	for v := err; v != nil; v = errors.Unwrap(v) {
+		if r, ok := v.(interface{ RetryAfter() time.Duration }); ok {
+			return gateway.NewErrorRetryAfter(err, r.RetryAfter())
+		}
 	}
 
 	// everything else returns 502 Bad Gateway
