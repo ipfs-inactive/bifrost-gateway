@@ -128,8 +128,8 @@ github.com/envoyproxy/go-control-plane v0.9.1-0.20191026205805-5f8ba28d4473/go.m
 github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1mIlRU8Am5FuJP05cCM98=
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/fatih/color v1.7.0/go.mod h1:Zm6kSWBoL9eyXnKyktHP6abPY2pDugNf5KwzbycvMj4=
-github.com/filecoin-saturn/caboose v0.0.0-20230302152536-a518e617b034 h1:2FW0FRhQdeXfrZc9O5gfHVo1nImi7IYmvyoghqiDCwk=
-github.com/filecoin-saturn/caboose v0.0.0-20230302152536-a518e617b034/go.mod h1:8r461tw36fg57kfCPGILFE0bWRodig93n0F1S90VIVg=
+github.com/filecoin-saturn/caboose v0.0.0-20230308085731-e621c985ff5b h1:uCD6KPv/Vhm6Y9tfwpIpVJ64VV/ZJd4eFwFMlaI9/OI=
+github.com/filecoin-saturn/caboose v0.0.0-20230308085731-e621c985ff5b/go.mod h1:8r461tw36fg57kfCPGILFE0bWRodig93n0F1S90VIVg=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
 github.com/flynn/noise v1.0.0 h1:DlTHqmzmvcEiKj+4RYo/imoswx/4r6iBlCMfVtrMXpQ=
 github.com/flynn/noise v1.0.0/go.mod h1:xbMo+0i6+IGbYdJhF31t2eR1BIU0CYc12+BNAKwUTag=
@@ -370,8 +370,8 @@ github.com/ipfs/go-ipld-legacy v0.1.1 h1:BvD8PEuqwBHLTKqlGFTHSwrwFOMkVESEvwIYwR2
 github.com/ipfs/go-ipld-legacy v0.1.1/go.mod h1:8AyKFCjgRPsQFf15ZQgDB8Din4DML/fOmKZkkFkrIEg=
 github.com/ipfs/go-ipns v0.3.0 h1:ai791nTgVo+zTuq2bLvEGmWP1M0A6kGTXUsgv/Yq67A=
 github.com/ipfs/go-ipns v0.3.0/go.mod h1:3cLT2rbvgPZGkHJoPO1YMJeh6LtkxopCkKFcio/wE24=
-github.com/ipfs/go-libipfs v0.6.1-0.20230224152609-00e024995173 h1:GO24W9RndedkB5jSuPbxPsF4wy0ZpqrXYG+Lf0RrdKY=
-github.com/ipfs/go-libipfs v0.6.1-0.20230224152609-00e024995173/go.mod h1:3OoEQs95UkqFEf65SbRDpiMwuzI+C/jTsYQaHfBbJXI=
+github.com/ipfs/go-libipfs v0.6.1-0.20230306084414-15f2131fe190 h1:uLCIMrKU1/SlZVDrTNfX3p6y4hv+cSZn51xiKU3glV8=
+github.com/ipfs/go-libipfs v0.6.1-0.20230306084414-15f2131fe190/go.mod h1:FmhKgxMOQA572TK5DA3MZ5GL44ZqsMHIrkgK4gLn4A8=
 github.com/ipfs/go-log v0.0.1/go.mod h1:kL1d2/hzSpI0thNYjiKfjanbVNU+IIGA/WnNESY9leM=
 github.com/ipfs/go-log v1.0.2/go.mod h1:1MNjMxe0u6xvJZgeqbJ8vdo2TKaGwZ1a0Bpza+sr2Sk=
 github.com/ipfs/go-log v1.0.3/go.mod h1:OsLySYkwIbiSUR/yBTdv1qPtcE4FW3WPWk/ewz9Ru+A=
