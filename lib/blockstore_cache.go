@@ -1,23 +1,26 @@
-package main
+package lib
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ipfs/go-cid"
-	format "github.com/ipfs/go-ipld-format"
-	"github.com/prometheus/client_golang/prometheus"
-
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	format "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-libipfs/blocks"
+	golog "github.com/ipfs/go-log/v2"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/prometheus/client_golang/prometheus"
 	uatomic "go.uber.org/atomic"
 	"go.uber.org/zap/zapcore"
 )
 
 const DefaultCacheBlockStoreSize = 1024
 
-func newCacheBlockStore(size int) (blockstore.Blockstore, error) {
+var goLog = golog.Logger("cache-blockstore")
+
+func NewCacheBlockStore(size int) (blockstore.Blockstore, error) {
 	c, err := lru.New2Q[string, []byte](size)
 	if err != nil {
 		return nil, err
@@ -126,7 +129,7 @@ func (l *cacheBlockStore) PutMany(ctx context.Context, blks []blocks.Block) erro
 }
 
 func (l *cacheBlockStore) AllKeysChan(ctx context.Context) (<-chan cid.Cid, error) {
-	return nil, errNotImplemented
+	return nil, errors.New("not implemented")
 }
 
 func (l *cacheBlockStore) HashOnRead(enabled bool) {

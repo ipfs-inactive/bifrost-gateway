@@ -1,10 +1,17 @@
 package main
 
 import (
-	_ "embed"
 	"errors"
 	"fmt"
 	"github.com/ipfs/bifrost-gateway/lib"
+	"github.com/ipfs/go-blockservice"
+	offline "github.com/ipfs/go-ipfs-exchange-offline"
+	"github.com/ipfs/go-libipfs/bitswap/client"
+	"github.com/ipfs/go-libipfs/bitswap/network"
+	golog "github.com/ipfs/go-log/v2"
+	carbs "github.com/ipld/go-car/v2/blockstore"
+	"github.com/libp2p/go-libp2p"
+	"github.com/spf13/cobra"
 	"log"
 	"net/http"
 	"os"
@@ -12,13 +19,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
-	golog "github.com/ipfs/go-log/v2"
-	"github.com/spf13/cobra"
 )
 
-var goLog = golog.Logger("bifrost-gateway")
+var goLog = golog.Logger("bifrost-gateway-backend")
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
@@ -27,67 +30,57 @@ func main() {
 	}
 }
 
-const (
-	EnvKuboRPC        = "KUBO_RPC_URL"
-	EnvBlockCacheSize = "BLOCK_CACHE_SIZE"
-)
-
 func init() {
 	rootCmd.Flags().Int("gateway-port", 8081, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8041, "metrics port")
-
+	rootCmd.Flags().String("car-blockstore", "", "a CAR file to use for serving data instead of network requests")
 }
 
 var rootCmd = &cobra.Command{
 	Use:               name,
 	Version:           version,
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
-	Short:             "IPFS Gateway implementation for https://github.com/protocol/bifrost-infra",
-	Long: `bifrost-gateway provides HTTP Gateway backed by a remote blockstore.
-See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
+	Short:             "IPFS Gateway backend implementation for https://github.com/protocol/bifrost-infra",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get flags.
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
+		carbsLocation, _ := cmd.Flags().GetString("car-blockstore")
 
-		// Get env variables.
-		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, "")
-		proxyGateway := getEnvs(EnvProxyGateway, "")
-		kuboRPC := getEnvs(EnvKuboRPC, DefaultKuboPRC)
+		var bsrv blockservice.BlockService
+		if carbsLocation == "" {
+			bs, err := carbs.OpenReadOnly(carbsLocation)
+			if err != nil {
+				return err
+			}
+			bsrv = blockservice.New(bs, offline.Exchange(bs))
+		} else {
+			//blockCacheSize, err := getEnvInt(EnvBlockCacheSize, lib.DefaultCacheBlockStoreSize)
+			//if err != nil {
+			//	return err
+			//}
+			blockCacheSize := lib.DefaultCacheBlockStoreSize
 
-		blockCacheSize, err := getEnvInt(EnvBlockCacheSize, lib.DefaultCacheBlockStoreSize)
-		if err != nil {
-			return err
+			bs, err := lib.NewCacheBlockStore(blockCacheSize)
+			if err != nil {
+				return err
+			}
+
+			h, err := libp2p.New()
+			if err != nil {
+				return err
+			}
+			n := network.NewFromIpfsHost(h, nil)
+			bsc := client.New(cmd.Context(), n, bs)
+			n.Start(bsc)
+			defer n.Stop()
+
+			bsrv = blockservice.New(bs, bsc)
 		}
 
 		log.Printf("Starting %s %s", name, version)
 
-		cdns := newCachedDNS(dnsCacheRefreshInterval)
-		defer cdns.Close()
-
-		var bs blockstore.Blockstore
-
-		if saturnOrchestrator != "" {
-			saturnLogger := getEnv(EnvSaturnLogger, DefaultSaturnLogger)
-			log.Printf("Saturn backend (%s) at %s", EnvSaturnOrchestrator, saturnOrchestrator)
-			log.Printf("Saturn logger  (%s) at %s", EnvSaturnLogger, saturnLogger)
-			if os.Getenv(EnvSaturnLoggerSecret) == "" {
-				log.Printf("")
-				log.Printf("  WARNING: %s is not set", EnvSaturnLoggerSecret)
-				log.Printf("")
-			}
-			bs, err = newCabooseBlockStore(saturnOrchestrator, saturnLogger, cdns)
-			if err != nil {
-				return err
-			}
-		} else if len(proxyGateway) != 0 {
-			log.Printf("Proxy backend (PROXY_GATEWAY_URL) at %s", strings.Join(proxyGateway, " "))
-			bs = newProxyBlockStore(proxyGateway, cdns)
-		} else {
-			log.Fatalf("Unable to start. bifrost-gateway requires either PROXY_GATEWAY_URL or STRN_ORCHESTRATOR_URL to be set.\n\nRead docs at https://github.com/ipfs/bifrost-gateway/blob/main/docs/environment-variables.md\n\n")
-		}
-
-		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize, cdns)
+		gatewaySrv, err := makeGatewayBlockHandler(bsrv, gatewayPort)
 		if err != nil {
 			return err
 		}
@@ -104,10 +97,9 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		go func() {
 			defer wg.Done()
 
-			log.Printf("%s: %d", EnvBlockCacheSize, blockCacheSize)
-			log.Printf("Legacy RPC at /api/v0 (%s) provided by %s", EnvKuboRPC, strings.Join(kuboRPC, " "))
+			//log.Printf("%s: %d", EnvBlockCacheSize, blockCacheSize)
 			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
-			log.Printf("  Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
+			log.Printf("  Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi?format=raw", gatewayPort)
 			log.Printf("Subdomain gateway configured on dweb.link and http://localhost:%d", gatewayPort)
 			log.Printf("  Smoke test (Subdomain+DNSLink+UnixFS+HAMT): http://localhost:%d/ipns/en.wikipedia-on-ipfs.org/wiki/", gatewayPort)
 			err := gatewaySrv.ListenAndServe()

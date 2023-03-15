@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ipfs/bifrost-gateway/lib"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -48,7 +49,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	}
 
 	// Sets up a cache to store blocks in
-	cacheBlockStore, err := newCacheBlockStore(blockCacheSize)
+	cacheBlockStore, err := lib.NewCacheBlockStore(blockCacheSize)
 	if err != nil {
 		return nil, err
 	}
