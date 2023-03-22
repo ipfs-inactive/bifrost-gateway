@@ -4,16 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	leveldb "github.com/ipfs/go-ds-leveldb"
-	offline "github.com/ipfs/go-ipfs-exchange-offline"
-	"github.com/ipld/go-car"
-	"io"
-	"net/http"
-
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/go-blockservice"
 	"github.com/ipfs/go-cid"
+	leveldb "github.com/ipfs/go-ds-leveldb"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	exchange "github.com/ipfs/go-ipfs-exchange-interface"
+	"github.com/ipfs/go-libipfs/blocks"
 	"github.com/ipfs/go-libipfs/files"
 	"github.com/ipfs/go-libipfs/gateway"
 	"github.com/ipfs/go-namesys"
@@ -21,10 +18,14 @@ import (
 	ipfspath "github.com/ipfs/go-path"
 	nsopts "github.com/ipfs/interface-go-ipfs-core/options/namesys"
 	ifacepath "github.com/ipfs/interface-go-ipfs-core/path"
+	"github.com/ipld/go-car"
 	routinghelpers "github.com/libp2p/go-libp2p-routing-helpers"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multicodec"
+	"github.com/multiformats/go-multihash"
+	"io"
+	"net/http"
 )
 
 // type DataCallback = func(resource string, reader io.Reader) error
@@ -134,46 +135,56 @@ Implementation iteration plan:
 5. Don't redo the last segment fully if it's part of a UnixFS file and we can do range requests
 */
 
-func (api *GraphGateway) loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx context.Context, path string) (blockstore.Blockstore, gateway.IPFSBackend, error) {
+func (api *GraphGateway) loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx context.Context, path string) (gateway.IPFSBackend, error) {
 	ds, err := leveldb.NewDatastore("", nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	bstore := blockstore.NewBlockstore(ds)
+	exch := newInboundBlockExchange()
 
-	err = api.fetcher.Fetch(ctx, path, func(resource string, reader io.Reader) error {
-		cr, err := car.NewCarReader(reader)
-		if err != nil {
-			return err
-		}
-		for {
-			blk, err := cr.Next()
+	doneWithFetcher := make(chan error, 1)
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("Recovered fetcher error", r)
+			}
+		}()
+		doneWithFetcher <- api.fetcher.Fetch(ctx, path, func(resource string, reader io.Reader) error {
+			cr, err := car.NewCarReader(reader)
 			if err != nil {
-				if errors.Is(err, io.EOF) {
-					return nil
+				return err
+			}
+			for {
+				blk, err := cr.Next()
+				if err != nil {
+					if errors.Is(err, io.EOF) {
+						return nil
+					}
+					return err
 				}
-				return err
+				if err := bstore.Put(ctx, blk); err != nil {
+					return err
+				}
+				if err := exch.NotifyNewBlocks(ctx, blk); err != nil {
+					return err
+				}
 			}
-			if err := bstore.Put(ctx, blk); err != nil {
-				return err
-			}
-		}
-	})
-	if err != nil {
-		return nil, nil, err
-	}
+		})
+	}()
 
-	bserv := blockservice.New(bstore, offline.Exchange(bstore))
+	bserv := blockservice.New(bstore, exch)
 	blkgw, err := gateway.NewBlocksGateway(bserv)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	return bstore, blkgw, nil
+	return blkgw, nil
 }
 
 func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, *gateway.GetResponse, error) {
-	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
+	blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -182,7 +193,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath) (g
 
 func (api *GraphGateway) GetRange(ctx context.Context, path gateway.ImmutablePath, getRange ...gateway.GetRange) (gateway.ContentPathMetadata, files.File, error) {
 	// TODO: actually implement ranges
-	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
+	blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -190,7 +201,7 @@ func (api *GraphGateway) GetRange(ctx context.Context, path gateway.ImmutablePat
 }
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=all")
+	blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=all")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -198,7 +209,7 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 }
 
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
-	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
+	blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -206,7 +217,7 @@ func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePat
 }
 
 func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&bytes=0:1023")
+	blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&bytes=0:1023")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -214,7 +225,7 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 }
 
 func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, error) {
-	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
+	blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, err
 	}
@@ -222,7 +233,7 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 }
 
 func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, io.ReadCloser, <-chan error, error) {
-	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car")
+	blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, nil, err
 	}
@@ -298,3 +309,46 @@ func (api *GraphGateway) GetDNSLinkRecord(ctx context.Context, hostname string) 
 }
 
 var _ gateway.IPFSBackend = (*GraphGateway)(nil)
+
+type inboundBlockExchange struct {
+	ps PubSub
+}
+
+func newInboundBlockExchange() *inboundBlockExchange {
+	return &inboundBlockExchange{
+		ps: NewPubSub(),
+	}
+}
+
+func (i *inboundBlockExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+	blk := <-i.ps.Subscribe(ctx, c.Hash())
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return blk, nil
+}
+
+func (i *inboundBlockExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
+	mhMap := make(map[string]struct{})
+	for _, c := range cids {
+		mhMap[string(c.Hash())] = struct{}{}
+	}
+	mhs := make([]multihash.Multihash, 0, len(mhMap))
+	for k := range mhMap {
+		mhs = append(mhs, multihash.Multihash(k))
+	}
+	return i.ps.Subscribe(ctx, mhs...), nil
+}
+
+func (i *inboundBlockExchange) NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error {
+	// TODO: handle context cancellation and/or blockage here
+	i.ps.Publish(blocks...)
+	return nil
+}
+
+func (i *inboundBlockExchange) Close() error {
+	i.ps.Shutdown()
+	return nil
+}
+
+var _ exchange.Interface = (*inboundBlockExchange)(nil)
