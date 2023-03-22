@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	leveldb "github.com/ipfs/go-ds-leveldb"
+	offline "github.com/ipfs/go-ipfs-exchange-offline"
+	"github.com/ipld/go-car"
 	"io"
 	"net/http"
 
@@ -131,44 +134,103 @@ Implementation iteration plan:
 5. Don't redo the last segment fully if it's part of a UnixFS file and we can do range requests
 */
 
+func (api *GraphGateway) loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx context.Context, path string) (blockstore.Blockstore, gateway.IPFSBackend, error) {
+	ds, err := leveldb.NewDatastore("", nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	bstore := blockstore.NewBlockstore(ds)
+
+	err = api.fetcher.Fetch(ctx, path, func(resource string, reader io.Reader) error {
+		cr, err := car.NewCarReader(reader)
+		if err != nil {
+			return err
+		}
+		for {
+			blk, err := cr.Next()
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					return nil
+				}
+				return err
+			}
+			if err := bstore.Put(ctx, blk); err != nil {
+				return err
+			}
+		}
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bserv := blockservice.New(bstore, offline.Exchange(bstore))
+	blkgw, err := gateway.NewBlocksGateway(bserv)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return bstore, blkgw, nil
+}
+
 func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, *gateway.GetResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	return blkgw.Get(ctx, path)
 }
 
 func (api *GraphGateway) GetRange(ctx context.Context, path gateway.ImmutablePath, getRange ...gateway.GetRange) (gateway.ContentPathMetadata, files.File, error) {
-	//TODO implement me
-	panic("implement me")
+	// TODO: actually implement ranges
+	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	return blkgw.GetRange(ctx, path)
 }
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	//TODO implement me
-	panic("implement me")
+	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=all")
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	return blkgw.GetAll(ctx, path)
 }
 
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
-	//TODO implement me
-	panic("implement me")
+	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	return blkgw.GetBlock(ctx, path)
 }
 
 func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	//TODO implement me
-	panic("implement me")
+	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&bytes=0:1023")
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	return blkgw.Head(ctx, path)
 }
 
 func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, error) {
-	//TODO implement me
-	panic("implement me")
+	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
+	if err != nil {
+		return gateway.ContentPathMetadata{}, err
+	}
+	return blkgw.ResolvePath(ctx, path)
 }
 
 func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, io.ReadCloser, <-chan error, error) {
-	//TODO implement me
-	panic("implement me")
+	_, blkgw, err := api.loadRequestIntoMemoryBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car")
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, nil, err
+	}
+	return blkgw.GetCAR(ctx, path)
 }
 
 func (api *GraphGateway) IsCached(ctx context.Context, path ifacepath.Path) bool {
-	//TODO implement me
-	panic("implement me")
+	return false
 }
 
 // TODO: This is copy-paste from blocks gateway, maybe share code

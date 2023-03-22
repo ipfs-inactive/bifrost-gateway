@@ -35,7 +35,7 @@ const (
 func init() {
 	rootCmd.Flags().Int("gateway-port", 8081, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8041, "metrics port")
-
+	rootCmd.Flags().Bool("graph-gateway", false, "use a graph fetching based gateway")
 }
 
 var rootCmd = &cobra.Command{
@@ -49,6 +49,7 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		// Get flags.
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")
 		metricsPort, _ := cmd.Flags().GetInt("metrics-port")
+		useGraphGateway, _ := cmd.Flags().GetBool("graph-gateway")
 
 		// Get env variables.
 		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, "")
@@ -87,7 +88,7 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 			log.Fatalf("Unable to start. bifrost-gateway requires either PROXY_GATEWAY_URL or STRN_ORCHESTRATOR_URL to be set.\n\nRead docs at https://github.com/ipfs/bifrost-gateway/blob/main/docs/environment-variables.md\n\n")
 		}
 
-		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize, cdns)
+		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize, cdns, useGraphGateway)
 		if err != nil {
 			return err
 		}

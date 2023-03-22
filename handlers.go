@@ -41,32 +41,41 @@ func withRequestLogger(next http.Handler) http.Handler {
 	})
 }
 
-func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS) (*http.Server, error) {
-	// Sets up an exchange based on the given Block Store
-	exch, err := newExchange(bs)
-	if err != nil {
-		return nil, err
-	}
-
-	// Sets up a cache to store blocks in
-	cacheBlockStore, err := lib.NewCacheBlockStore(blockCacheSize)
-	if err != nil {
-		return nil, err
-	}
-
-	// Set up support for identity hashes (https://github.com/ipfs/bifrost-gateway/issues/38)
-	cacheBlockStore = bstore.NewIdStore(cacheBlockStore)
-
-	// Sets up a blockservice which tries the cache and falls back to the exchange
-	blockService := blockservice.New(cacheBlockStore, exch)
-
+func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphGatewayBackend bool) (*http.Server, error) {
 	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
 	routing := newProxyRouting(kuboRPC, cdns)
 
-	// Creates the gateway with the block service and the routing.
-	gwAPI, err := gateway.NewBlocksGateway(blockService, gateway.WithValueStore(routing))
-	if err != nil {
-		return nil, err
+	var gwAPI gateway.IPFSBackend
+	var err error
+	if !useGraphGatewayBackend {
+		// Sets up an exchange based on the given Block Store
+		exch, err := newExchange(bs)
+		if err != nil {
+			return nil, err
+		}
+
+		// Sets up a cache to store blocks in
+		cacheBlockStore, err := lib.NewCacheBlockStore(blockCacheSize)
+		if err != nil {
+			return nil, err
+		}
+
+		// Set up support for identity hashes (https://github.com/ipfs/bifrost-gateway/issues/38)
+		cacheBlockStore = bstore.NewIdStore(cacheBlockStore)
+
+		// Sets up a blockservice which tries the cache and falls back to the exchange
+		blockService := blockservice.New(cacheBlockStore, exch)
+
+		// Creates the gateway with the block service and the routing.
+		gwAPI, err = gateway.NewBlocksGateway(blockService, gateway.WithValueStore(routing))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		gwAPI, err = lib.NewGraphGatewayBackend(bs.(lib.CarFetcher), lib.WithValueStore(routing))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	headers := map[string][]string{}
