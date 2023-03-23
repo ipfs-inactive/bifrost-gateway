@@ -34,8 +34,8 @@ func main() {
 }
 
 func init() {
-	rootCmd.Flags().Int("gateway-port", 8081, "gateway port")
-	rootCmd.Flags().Int("metrics-port", 8041, "metrics port")
+	rootCmd.Flags().Int("gateway-port", 8082, "gateway port")
+	rootCmd.Flags().Int("metrics-port", 8042, "metrics port")
 	rootCmd.Flags().String("car-blockstore", "", "a CAR file to use for serving data instead of network requests")
 	golog.SetLogLevel("bifrost-gateway-backend", "debug")
 }
