@@ -109,13 +109,14 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err e
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("routing/get RPC returned unexpected status: %s", resp.Status)
-	}
-
-	rb, err = io.ReadAll(resp.Body)
+	// Read at most 10 KiB (max size of IPNS record).
+	rb, err = io.ReadAll(io.LimitReader(resp.Body, 10240))
 	if err != nil {
 		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("routing/get RPC returned unexpected status: %s, body: %q", resp.Status, string(rb))
 	}
 
 	parts := bytes.Split(bytes.TrimSpace(rb), []byte("\n"))
