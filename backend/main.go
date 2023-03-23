@@ -34,6 +34,7 @@ func init() {
 	rootCmd.Flags().Int("gateway-port", 8081, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8041, "metrics port")
 	rootCmd.Flags().String("car-blockstore", "", "a CAR file to use for serving data instead of network requests")
+	golog.SetLogLevel("bifrost-gateway-backend", "debug")
 }
 
 var rootCmd = &cobra.Command{
@@ -80,9 +81,19 @@ var rootCmd = &cobra.Command{
 
 		log.Printf("Starting %s %s", name, version)
 
-		gatewaySrv, err := makeGatewayBlockHandler(bsrv, gatewayPort)
-		if err != nil {
-			return err
+		var gatewaySrv *http.Server
+		var err error
+
+		if true {
+			gatewaySrv, err = makeGatewayCARHandler(bsrv, gatewayPort)
+			if err != nil {
+				return err
+			}
+		} else {
+			gatewaySrv, err = makeGatewayBlockHandler(bsrv, gatewayPort)
+			if err != nil {
+				return err
+			}
 		}
 
 		metricsSrv, err := makeMetricsHandler(metricsPort)
