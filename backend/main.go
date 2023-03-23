@@ -11,6 +11,9 @@ import (
 	golog "github.com/ipfs/go-log/v2"
 	carbs "github.com/ipld/go-car/v2/blockstore"
 	"github.com/libp2p/go-libp2p"
+	dht "github.com/libp2p/go-libp2p-kad-dht"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/spf13/cobra"
 	"log"
 	"net/http"
@@ -49,7 +52,7 @@ var rootCmd = &cobra.Command{
 		carbsLocation, _ := cmd.Flags().GetString("car-blockstore")
 
 		var bsrv blockservice.BlockService
-		if carbsLocation == "" {
+		if carbsLocation != "" {
 			bs, err := carbs.OpenReadOnly(carbsLocation)
 			if err != nil {
 				return err
@@ -67,11 +70,15 @@ var rootCmd = &cobra.Command{
 				return err
 			}
 
-			h, err := libp2p.New()
+			var r routing.Routing
+			h, err := libp2p.New(libp2p.Routing(func(host host.Host) (routing.PeerRouting, error) {
+				r, err = dht.New(cmd.Context(), host, dht.BootstrapPeersFunc(dht.GetDefaultBootstrapPeerAddrInfos))
+				return r, err
+			}))
 			if err != nil {
 				return err
 			}
-			n := network.NewFromIpfsHost(h, nil)
+			n := network.NewFromIpfsHost(h, r)
 			bsc := client.New(cmd.Context(), n, bs)
 			n.Start(bsc)
 			defer n.Stop()

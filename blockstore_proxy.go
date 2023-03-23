@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/ipfs/bifrost-gateway/lib"
 	"io"
 	"log"
 	"math/rand"
@@ -34,6 +35,36 @@ type proxyBlockStore struct {
 	validate   bool
 	rand       *rand.Rand
 }
+
+func (ps *proxyBlockStore) Fetch(ctx context.Context, path string, cb lib.DataCallback) error {
+	u, err := url.Parse(fmt.Sprintf("%s/%s", ps.getRandomGatewayURL(), path))
+	if err != nil {
+		return err
+	}
+	resp, err := ps.httpClient.Do(&http.Request{
+		Method: http.MethodGet,
+		URL:    u,
+		Header: http.Header{
+			"Accept": []string{"application/vnd.ipld.car"},
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("http error from car gateway: %s", resp.Status)
+	}
+
+	err = cb(path, resp.Body)
+	if err != nil {
+		resp.Body.Close()
+		return err
+	}
+	return resp.Body.Close()
+}
+
+var _ lib.CarFetcher = (*proxyBlockStore)(nil)
 
 func newProxyBlockStore(gatewayURL []string, cdns *cachedDNS) blockstore.Blockstore {
 	s := rand.NewSource(time.Now().Unix())
