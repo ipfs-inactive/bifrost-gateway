@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/ipfs/bifrost-gateway/lib"
 	"io"
 	"log"
 	"math/rand"
@@ -11,6 +10,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/ipfs/bifrost-gateway/lib"
 	"github.com/ipfs/go-cid"
 	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	"github.com/ipfs/go-libipfs/blocks"

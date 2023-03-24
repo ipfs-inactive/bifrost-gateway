@@ -72,7 +72,13 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 			return nil, err
 		}
 	} else {
-		gwAPI, err = lib.NewGraphGatewayBackend(bs.(lib.CarFetcher), lib.WithValueStore(routing))
+		// Sets up an exchange based on the given Block Store
+		exch, err := newExchange(bs)
+		if err != nil {
+			return nil, err
+		}
+
+		gwAPI, err = lib.NewGraphGatewayBackend(bs.(lib.CarFetcher), exch, lib.WithValueStore(routing))
 		if err != nil {
 			return nil, err
 		}
