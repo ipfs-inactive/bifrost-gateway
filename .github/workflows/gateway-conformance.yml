@@ -25,7 +25,7 @@ jobs:
 
       # 3. Populate the Kubo gateway with the gateway-conformance fixtures
       - name: Import fixtures
-        run: find ./fixtures -name '*.car' -exec ipfs dag import {} \;
+        run: find ./fixtures -name '*.car' -exec ipfs dag import --pin-roots=false {} \;
 
       # 4. Build the bifrost-gateway
       - name: Setup Go
