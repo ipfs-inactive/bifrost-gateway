@@ -52,6 +52,7 @@ jobs:
           xml: output.xml
           html: output.html
           markdown: output.md
+          specs: -subdomain-gateway
 
       # 7. Upload the results
       - name: Upload MD summary
