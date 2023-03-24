@@ -100,7 +100,7 @@ func makeGatewayCARHandler(bsrv blockservice.BlockService, port int) (*http.Serv
 			for _, header := range r.Header.Values("Accept") {
 				for _, value := range strings.Split(header, ",") {
 					accept := strings.TrimSpace(value)
-					if accept == "application/vnd.ipld.car" {
+					if strings.HasPrefix(accept, "application/vnd.ipld.car") {
 						isCar = true
 						break
 					}
