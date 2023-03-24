@@ -3,6 +3,7 @@
 *.coverprofile
 *.test
 *.orig
+*.exe
 *~
 
 .tarball
