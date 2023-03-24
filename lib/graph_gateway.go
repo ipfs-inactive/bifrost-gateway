@@ -109,7 +109,7 @@ func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ..
 	bs := compiledOptions.bs
 	if compiledOptions.bs == nil {
 		// Sets up a cache to store blocks in
-		cbs, err := NewCacheBlockStore(1000)
+		cbs, err := NewCacheBlockStore(DefaultCacheBlockStoreSize)
 		if err != nil {
 			return nil, err
 		}
