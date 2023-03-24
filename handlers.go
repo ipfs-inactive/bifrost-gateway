@@ -33,6 +33,20 @@ func makeMetricsHandler(port int) (*http.Server, error) {
 	}, nil
 }
 
+func withConnect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ServeMux does not support requests with CONNECT method,
+		// so we need to handle them separately
+		// https://golang.org/src/net/http/request.go#L111
+		if r.Method == http.MethodConnect {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func withRequestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		goLog.Infow(r.Method, "url", r.URL, "host", r.Host)
@@ -122,7 +136,8 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	}
 
 	// Construct the HTTP handler for the gateway.
-	handler := http.Handler(gateway.WithHostname(mux, gwAPI, publicGateways, noDNSLink))
+	handler := withConnect(mux)
+	handler = http.Handler(gateway.WithHostname(handler, gwAPI, publicGateways, noDNSLink))
 	handler = promhttp.InstrumentHandlerResponseSize(sum, handler)
 
 	// Add logging
