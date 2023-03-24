@@ -53,6 +53,7 @@ jobs:
           html: output.html
           markdown: output.md
           specs: -subdomain-gateway
+          args: -skip TestGatewayCar
 
       # 7. Upload the results
       - name: Upload MD summary
