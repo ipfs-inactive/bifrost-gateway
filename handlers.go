@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -94,6 +95,15 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 			NoDNSLink:     noDNSLink,
 			UseSubdomains: true,
 		},
+	}
+
+	// If we're doing tests, ensure the right public gateways are enabled.
+	if os.Getenv("GATEWAY_CONFORMANCE_TEST") == "true" {
+		publicGateways["example.com"] = &gateway.Specification{
+			Paths:         []string{"/ipfs", "/ipns"},
+			NoDNSLink:     noDNSLink,
+			UseSubdomains: true,
+		}
 	}
 
 	// Creates metrics handler for total response size. Matches the same metrics

@@ -44,6 +44,7 @@ jobs:
       - name: Start bifrost-gateway
         env:
           PROXY_GATEWAY_URL: http://127.0.0.1:8080
+          GATEWAY_CONFORMANCE_TEST: true
         run: ./bifrost-gateway &
         working-directory: bifrost-gateway
 
@@ -57,7 +58,6 @@ jobs:
           xml: output.xml
           html: output.html
           markdown: output.md
-          specs: -subdomain-gateway
           args: -skip TestGatewayCar
 
       # 7. Upload the results
