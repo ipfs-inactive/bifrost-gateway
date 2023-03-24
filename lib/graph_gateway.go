@@ -323,12 +323,12 @@ func (api *GraphGateway) GetDNSLinkRecord(ctx context.Context, hostname string) 
 var _ gateway.IPFSBackend = (*GraphGateway)(nil)
 
 type inboundBlockExchange struct {
-	ps PubSub
+	ps BlockPubSub
 }
 
 func newInboundBlockExchange() *inboundBlockExchange {
 	return &inboundBlockExchange{
-		ps: NewPubSub(),
+		ps: NewBlockPubSub(),
 	}
 }
 

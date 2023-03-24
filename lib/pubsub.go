@@ -14,18 +14,18 @@ import (
 
 const bufferSize = 16
 
-// PubSub is a simple interface for publishing blocks and being able to subscribe
+// BlockPubSub is a simple interface for publishing blocks and being able to subscribe
 // for multihashes. It's used internally by an exchange to decouple receiving blocks
 // and actually providing them back to the GetBlocks caller.
 // Note: because multihashes are being requested and blocks returned the codecs could be anything
-type PubSub interface {
+type BlockPubSub interface {
 	Publish(blocks ...blocks.Block)
 	Subscribe(ctx context.Context, keys ...multihash.Multihash) <-chan blocks.Block
 	Shutdown()
 }
 
-// NewPubSub generates a new PubSub interface.
-func NewPubSub() PubSub {
+// NewBlockPubSub generates a new BlockPubSub interface.
+func NewBlockPubSub() BlockPubSub {
 	return &impl{
 		wrapped: *pubsub.New(bufferSize),
 		closed:  make(chan struct{}),
