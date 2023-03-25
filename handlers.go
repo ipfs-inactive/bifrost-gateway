@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/ipfs/bifrost-gateway/lib"
 	"math/rand"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/ipfs/bifrost-gateway/lib"
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/go-blockservice"
@@ -41,13 +42,13 @@ func withRequestLogger(next http.Handler) http.Handler {
 	})
 }
 
-func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphGatewayBackend bool) (*http.Server, error) {
+func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphBackend bool) (*http.Server, error) {
 	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
 	routing := newProxyRouting(kuboRPC, cdns)
 
 	var gwAPI gateway.IPFSBackend
 	var err error
-	if !useGraphGatewayBackend {
+	if !useGraphBackend {
 		// Sets up an exchange based on the given Block Store
 		exch, err := newExchange(bs)
 		if err != nil {

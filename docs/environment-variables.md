@@ -5,6 +5,7 @@
 - [Configuration](#configuration)
   - [`KUBO_RPC_URL`](#kubo_rpc_url)
   - [`BLOCK_CACHE_SIZE`](#block_cache_size)
+  - [`GRAPH_BACKEND`](#graph_backend)
 - [Proxy Backend](#proxy-backend)
   - [`PROXY_GATEWAY_URL`](#proxy_gateway_url)
 - [Saturn Backend](#saturn-backend)
@@ -22,6 +23,8 @@
 
 ### `KUBO_RPC_URL`
 
+Default: see `DefaultKuboRPC`
+
 Single URL or a comma separated list of RPC endpoints that provide `/api/v0` from Kubo.
 
 We use this as temporary solution for IPNS Record routing until [IPIP-351](https://github.com/ipfs/specs/pull/351) ships with Kubo 0.19,
@@ -29,7 +32,23 @@ and we also redirect some legacy `/api/v0` commands that need to be handled on `
 
 ### `BLOCK_CACHE_SIZE`
 
+Default: see `DefaultCacheBlockStoreSize`
+
 The size of in-memory [2Q cache](https://pkg.go.dev/github.com/hashicorp/golang-lru/v2#TwoQueueCache) with recently used and most requently used blocks.
+
+### `GRAPH_BACKEND`
+
+Default: `false`
+
+When set to `true`, requests to backend will use
+`?format=car&depth=..&bytes=..` in addition to `?format=raw` to reduce the
+number of round trips.
+
+This is an experimental feature that depends on `&depth=..&bytes=..`
+parameters.  Currently only `https://l1s.strn.pl` supports it, but our
+intention is to standardize it and add it to the
+[trustless gateway spec](https://specs.ipfs.tech/http-gateways/trustless-gateway/)
+in the near feature.
 
 ## Proxy Backend
 
