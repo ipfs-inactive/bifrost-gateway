@@ -58,7 +58,7 @@ jobs:
           xml: output.xml
           html: output.html
           markdown: output.md
-          args: -skip TestGatewayCar
+          args: -skip 'TestGatewayCar/GET_response_for_application/vnd.ipld.car'
 
       # 7. Upload the results
       - name: Upload MD summary
