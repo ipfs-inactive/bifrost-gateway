@@ -37,10 +37,11 @@ type proxyBlockStore struct {
 }
 
 func (ps *proxyBlockStore) Fetch(ctx context.Context, path string, cb lib.DataCallback) error {
-	u, err := url.Parse(fmt.Sprintf("%s/%s", ps.getRandomGatewayURL(), path))
+	u, err := url.Parse(fmt.Sprintf("%s%s", ps.getRandomGatewayURL(), path))
 	if err != nil {
 		return err
 	}
+	goLog.Debugw("car fetch", "url", u)
 	resp, err := ps.httpClient.Do(&http.Request{
 		Method: http.MethodGet,
 		URL:    u,
@@ -102,6 +103,7 @@ func (ps *proxyBlockStore) fetch(ctx context.Context, c cid.Cid) (blocks.Block, 
 	if err != nil {
 		return nil, err
 	}
+	goLog.Debugw("raw fetch", "url", u)
 	resp, err := ps.httpClient.Do(&http.Request{
 		Method: http.MethodGet,
 		URL:    u,
