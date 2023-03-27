@@ -54,23 +54,22 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
 	routing := newProxyRouting(kuboRPC, cdns)
 
+	// Sets up a cache to store blocks in
+	cacheBlockStore, err := lib.NewCacheBlockStore(blockCacheSize)
+	if err != nil {
+		return nil, err
+	}
+
+	// Set up support for identity hashes (https://github.com/ipfs/bifrost-gateway/issues/38)
+	cacheBlockStore = bstore.NewIdStore(cacheBlockStore)
+
 	var gwAPI gateway.IPFSBackend
-	var err error
 	if !useGraphBackend {
 		// Sets up an exchange based on the given Block Store
 		exch, err := newExchange(bs)
 		if err != nil {
 			return nil, err
 		}
-
-		// Sets up a cache to store blocks in
-		cacheBlockStore, err := lib.NewCacheBlockStore(blockCacheSize)
-		if err != nil {
-			return nil, err
-		}
-
-		// Set up support for identity hashes (https://github.com/ipfs/bifrost-gateway/issues/38)
-		cacheBlockStore = bstore.NewIdStore(cacheBlockStore)
 
 		// Sets up a blockservice which tries the cache and falls back to the exchange
 		blockService := blockservice.New(cacheBlockStore, exch)
@@ -87,7 +86,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 			return nil, err
 		}
 
-		gwAPI, err = lib.NewGraphGatewayBackend(bs.(lib.CarFetcher), exch, lib.WithValueStore(routing))
+		gwAPI, err = lib.NewGraphGatewayBackend(bs.(lib.CarFetcher), exch, lib.WithValueStore(routing), lib.WithBlockstore(cacheBlockStore))
 		if err != nil {
 			return nil, err
 		}
