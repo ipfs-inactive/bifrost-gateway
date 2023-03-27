@@ -98,7 +98,7 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 			return err
 		}
 
-		metricsSrv, err := makeMetricsHandler(metricsPort)
+		metricsSrv, err := makeMetricsAndDebuggingHandler(metricsPort)
 		if err != nil {
 			return err
 		}
