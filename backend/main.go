@@ -19,8 +19,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -145,32 +143,4 @@ var rootCmd = &cobra.Command{
 		wg.Wait()
 		return nil
 	},
-}
-
-func getEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-func getEnvs(key, defaultValue string) []string {
-	value := os.Getenv(key)
-	if value == "" {
-		if defaultValue == "" {
-			return []string{}
-		}
-		value = defaultValue
-	}
-	value = strings.TrimSpace(value)
-	return strings.Split(value, ",")
-}
-
-func getEnvInt(key string, defaultValue int) (int, error) {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue, nil
-	}
-	return strconv.Atoi(value)
 }

@@ -130,11 +130,11 @@ func makeGatewayCARHandler(bsrv blockservice.BlockService, port int) (*http.Serv
 		const immutableCacheControl = "public, max-age=29030400, immutable"
 		// immutable! CACHE ALL THE THINGS, FOREVER! wolololol
 		w.Header().Set("Cache-Control", immutableCacheControl)
+		w.Header().Set("Server", userAgent)
 
 		// Set modtime to 'zero time' to disable Last-Modified header (superseded by Cache-Control)
 
 		io.Copy(w, carStream)
-		return
 	})
 
 	// Creates metrics handler for total response size. Matches the same metrics
@@ -591,11 +591,11 @@ func makeGatewayBlockHandler(bsrv blockservice.BlockService, port int) (*http.Se
 		const immutableCacheControl = "public, max-age=29030400, immutable"
 		// immutable! CACHE ALL THE THINGS, FOREVER! wolololol
 		w.Header().Set("Cache-Control", immutableCacheControl)
+		w.Header().Set("Server", userAgent)
 
 		// Set modtime to 'zero time' to disable Last-Modified header (superseded by Cache-Control)
 
 		http.ServeContent(w, r, c.String()+".bin", noModtime, bytes.NewReader(blk.RawData()))
-		return
 	})
 
 	// Creates metrics handler for total response size. Matches the same metrics
