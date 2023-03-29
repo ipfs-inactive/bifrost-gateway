@@ -36,14 +36,14 @@ func init() {
 	rootCmd.Flags().Int("gateway-port", 8082, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8042, "metrics port")
 	rootCmd.Flags().String("car-blockstore", "", "a CAR file to use for serving data instead of network requests")
-	golog.SetLogLevel("bifrost-gateway-backend", "debug")
+	golog.SetLogLevel("test-backend", "debug")
 }
 
 var rootCmd = &cobra.Command{
 	Use:               name,
 	Version:           version,
 	CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
-	Short:             "IPFS Gateway backend implementation for https://github.com/protocol/bifrost-infra",
+	Short:             "Test Gateway backend for https://github.com/ipfs/bifrost-gateway (EXPERIMENTAL)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get flags.
 		gatewayPort, _ := cmd.Flags().GetInt("gateway-port")

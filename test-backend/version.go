@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-var name = "bifrost-gateway-backend"
+var name = "test-backend"
 var version = buildVersion()
 var userAgent = name + "/" + version
 
