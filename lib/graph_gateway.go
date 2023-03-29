@@ -82,7 +82,6 @@ type GraphGateway struct {
 	routing      routing.ValueStore
 	namesys      namesys.NameSystem
 	bstore       blockstore.Blockstore
-	bsrv         blockservice.BlockService
 
 	lk        sync.RWMutex
 	notifiers map[Notifier]struct{}
@@ -244,15 +243,15 @@ func (w *dirCloseWrapper) Close() error {
 func wrapNodeWithClose[T files.Node](node T, closeFn func()) (T, error) {
 	var genericNode files.Node = node
 	switch n := genericNode.(type) {
+	case *files.Symlink:
+		closeFn()
+		return node, nil
 	case files.File:
 		var f files.File = &fileCloseWrapper{n, closeFn}
 		return f.(T), nil
 	case files.Directory:
 		var d files.Directory = &dirCloseWrapper{n, closeFn}
 		return d.(T), nil
-	case *files.Symlink:
-		closeFn()
-		return node, nil
 	default:
 		closeFn()
 		var zeroType T
@@ -537,17 +536,15 @@ func (f *handoffExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan
 					return
 				}
 				for cs.Len() < len(cids) {
+					blk, ok := <-fch
+					if !ok {
+						return
+					}
 					select {
-					case blk, ok := <-fch:
-						if !ok {
-							return
-						}
-						select {
-						case retCh <- blk:
-							cs.Add(blk.Cid())
-						case <-ctx.Done():
-							return
-						}
+					case retCh <- blk:
+						cs.Add(blk.Cid())
+					case <-ctx.Done():
+						return
 					}
 				}
 			}
