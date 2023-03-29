@@ -18,6 +18,7 @@ import (
 	ipfspath "github.com/ipfs/boxo/path"
 	"github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
+	format "github.com/ipfs/go-ipld-format"
 	routinghelpers "github.com/libp2p/go-libp2p-routing-helpers"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
@@ -437,9 +438,12 @@ func newInboundBlockExchange() *inboundBlockExchange {
 }
 
 func (i *inboundBlockExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	blk := <-i.ps.Subscribe(ctx, c.Hash())
+	blk, more := <-i.ps.Subscribe(ctx, c.Hash())
 	if err := ctx.Err(); err != nil {
 		return nil, err
+	}
+	if !more {
+		return nil, format.ErrNotFound{Cid: c}
 	}
 	return blk, nil
 }
@@ -534,7 +538,10 @@ func (f *handoffExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan
 				}
 				for cs.Len() < len(cids) {
 					select {
-					case blk := <-fch:
+					case blk, ok := <-fch:
+						if !ok {
+							return
+						}
 						select {
 						case retCh <- blk:
 							cs.Add(blk.Cid())
