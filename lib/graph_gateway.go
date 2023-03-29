@@ -26,6 +26,8 @@ import (
 	"go.uber.org/multierr"
 	"io"
 	"net/http"
+	"runtime"
+	"sync"
 )
 
 // type DataCallback = func(resource string, reader io.Reader) error
@@ -69,6 +71,10 @@ func WithBlockstore(bs blockstore.Blockstore) GraphGatewayOption {
 
 type GraphGatewayOption func(gwOptions *gwOptions) error
 
+type Notifier interface {
+	NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error
+}
+
 type GraphGateway struct {
 	fetcher      CarFetcher
 	blockFetcher exchange.Fetcher
@@ -76,6 +82,9 @@ type GraphGateway struct {
 	namesys      namesys.NameSystem
 	bstore       blockstore.Blockstore
 	bsrv         blockservice.BlockService
+
+	lk        sync.RWMutex
+	notifiers map[Notifier]struct{}
 }
 
 func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ...GraphGatewayOption) (*GraphGateway, error) {
@@ -124,6 +133,7 @@ func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ..
 		routing:      vs,
 		namesys:      ns,
 		bstore:       bs,
+		notifiers:    make(map[Notifier]struct{}),
 	}, nil
 }
 
@@ -137,7 +147,7 @@ Implementation iteration plan:
 5. Don't redo the last segment fully if it's part of a UnixFS file and we can do range requests
 */
 
-func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx context.Context, path string) (gateway.IPFSBackend, error) {
+func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx context.Context, path string) (gateway.IPFSBackend, func(), error) {
 	bstore := api.bstore
 	carFetchingExch := newInboundBlockExchange()
 	doneWithFetcher := make(chan struct{}, 1)
@@ -146,6 +156,10 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 		followupExchange: &blockFetcherExchWrapper{api.blockFetcher},
 		handoffCh:        doneWithFetcher,
 	}
+
+	api.lk.Lock()
+	api.notifiers[exch] = struct{}{}
+	api.lk.Unlock()
 
 	go func() {
 		defer func() {
@@ -169,12 +183,13 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 				if err := bstore.Put(ctx, blk); err != nil {
 					return err
 				}
-				if err := carFetchingExch.NotifyNewBlocks(ctx, blk); err != nil {
-					return err
-				}
+				api.notifyAllOngoingRequests(ctx, blk)
 			}
 		})
 		if err != nil {
+			goLog.Error(err)
+		}
+		if err := carFetchingExch.Close(); err != nil {
 			goLog.Error(err)
 		}
 		doneWithFetcher <- struct{}{}
@@ -184,66 +199,160 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 	bserv := blockservice.New(bstore, exch)
 	blkgw, err := gateway.NewBlocksGateway(bserv)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return blkgw, nil
+	return blkgw, func() {
+		api.lk.Lock()
+		delete(api.notifiers, exch)
+		api.lk.Unlock()
+	}, nil
+}
+
+func (api *GraphGateway) notifyAllOngoingRequests(ctx context.Context, blks ...blocks.Block) {
+	api.lk.RLock()
+	for n := range api.notifiers {
+		err := n.NotifyNewBlocks(ctx, blks...)
+		if err != nil {
+			goLog.Error(fmt.Errorf("notifyAllOngoingRequests failed: %w", err))
+		}
+	}
+	api.lk.RUnlock()
+}
+
+type fileCloseWrapper struct {
+	files.File
+	closeFn func()
+}
+
+func (w *fileCloseWrapper) Close() error {
+	w.closeFn()
+	return w.File.Close()
+}
+
+type dirCloseWrapper struct {
+	files.Directory
+	closeFn func()
+}
+
+func (w *dirCloseWrapper) Close() error {
+	w.closeFn()
+	return w.Directory.Close()
+}
+
+func wrapNodeWithClose[T files.Node](node T, closeFn func()) (T, error) {
+	var genericNode files.Node = node
+	switch n := genericNode.(type) {
+	case files.File:
+		var f files.File = &fileCloseWrapper{n, closeFn}
+		return f.(T), nil
+	case files.Directory:
+		var d files.Directory = &dirCloseWrapper{n, closeFn}
+		return d.(T), nil
+	case *files.Symlink:
+		closeFn()
+		return node, nil
+	default:
+		closeFn()
+		var zeroType T
+		return zeroType, fmt.Errorf("unsupported node type")
+	}
 }
 
 func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, *gateway.GetResponse, error) {
-	blkgw, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
-	return blkgw.Get(ctx, path)
+	md, gr, err := blkgw.Get(ctx, path)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	//TODO: interfaces here aren't good enough so we're getting around the problem this way
+	runtime.SetFinalizer(gr, func(_ *gateway.GetResponse) { closeFn() })
+	return md, gr, err
 }
 
 func (api *GraphGateway) GetRange(ctx context.Context, path gateway.ImmutablePath, getRange ...gateway.GetRange) (gateway.ContentPathMetadata, files.File, error) {
 	// TODO: actually implement ranges
-	blkgw, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
-	return blkgw.GetRange(ctx, path)
+	md, f, err := blkgw.GetRange(ctx, path)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	f, err = wrapNodeWithClose(f, closeFn)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	return md, f, nil
 }
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	blkgw, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=all")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=all")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
-	return blkgw.GetAll(ctx, path)
+	md, f, err := blkgw.GetAll(ctx, path)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	f, err = wrapNodeWithClose(f, closeFn)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	return md, f, nil
 }
 
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
-	blkgw, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
-	return blkgw.GetBlock(ctx, path)
+	md, f, err := blkgw.GetBlock(ctx, path)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	f, err = wrapNodeWithClose(f, closeFn)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	return md, f, nil
 }
 
 func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	blkgw, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&bytes=0:1023")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&bytes=0:1023")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
-	return blkgw.Head(ctx, path)
+	md, f, err := blkgw.Head(ctx, path)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	f, err = wrapNodeWithClose(f, closeFn)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	return md, f, nil
 }
 
 func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, error) {
-	blkgw, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, err
 	}
+	defer closeFn()
 	return blkgw.ResolvePath(ctx, path)
 }
 
 func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, io.ReadCloser, <-chan error, error) {
-	blkgw, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, nil, err
 	}
+	defer closeFn()
 	return blkgw.GetCAR(ctx, path)
 }
 
