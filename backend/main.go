@@ -3,6 +3,12 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"sync"
+
 	"github.com/ipfs/bifrost-gateway/lib"
 	"github.com/ipfs/boxo/bitswap/client"
 	"github.com/ipfs/boxo/bitswap/network"
@@ -15,14 +21,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/spf13/cobra"
-	"log"
-	"net/http"
-	"os"
-	"os/signal"
-	"sync"
 )
 
-var goLog = golog.Logger("bifrost-gateway-backend")
+var goLog = golog.Logger("test-backend")
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {

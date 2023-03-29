@@ -8,7 +8,7 @@ import (
 	format "github.com/ipfs/go-ipld-format"
 
 	blockstore "github.com/ipfs/boxo/blockstore"
-	"github.com/ipfs/go-block-format"
+	blocks "github.com/ipfs/go-block-format"
 	golog "github.com/ipfs/go-log/v2"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -19,7 +19,7 @@ import (
 
 const DefaultCacheBlockStoreSize = 1024
 
-var goLog = golog.Logger("cache-blockstore")
+var cacheLog = golog.Logger("bifrost-gateway:cache-blockstore")
 
 func NewCacheBlockStore(size int) (blockstore.Blockstore, error) {
 	c, err := lru.New2Q[string, []byte](size)
@@ -80,16 +80,16 @@ func (l *cacheBlockStore) Get(ctx context.Context, c cid.Cid) (blocks.Block, err
 
 	blkData, found := l.cache.Get(string(c.Hash()))
 	if !found {
-		if goLog.Level().Enabled(zapcore.DebugLevel) {
-			goLog.Debugw("block not found in cache", "cid", c.String())
+		if cacheLog.Level().Enabled(zapcore.DebugLevel) {
+			cacheLog.Debugw("block not found in cache", "cid", c.String())
 		}
 		return nil, format.ErrNotFound{Cid: c}
 	}
 
 	// It's a HIT!
 	l.cacheHitsMetric.Add(1)
-	if goLog.Level().Enabled(zapcore.DebugLevel) {
-		goLog.Debugw("block found in cache", "cid", c.String())
+	if cacheLog.Level().Enabled(zapcore.DebugLevel) {
+		cacheLog.Debugw("block found in cache", "cid", c.String())
 	}
 
 	if l.rehash.Load() {

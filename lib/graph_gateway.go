@@ -4,6 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"runtime"
+	"sync"
+
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/boxo/blockservice"
 	blockstore "github.com/ipfs/boxo/blockstore"
@@ -16,20 +21,19 @@ import (
 	"github.com/ipfs/boxo/namesys"
 	"github.com/ipfs/boxo/namesys/resolve"
 	ipfspath "github.com/ipfs/boxo/path"
-	"github.com/ipfs/go-block-format"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
+	golog "github.com/ipfs/go-log/v2"
 	routinghelpers "github.com/libp2p/go-libp2p-routing-helpers"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
 	"go.uber.org/multierr"
-	"io"
-	"net/http"
-	"runtime"
-	"sync"
 )
+
+var graphLog = golog.Logger("bifrost-gateway:graph-backend")
 
 // type DataCallback = func(resource string, reader io.Reader) error
 // TODO: Don't use a caboose type, perhaps ask them to use a type alias instead of a type
@@ -187,10 +191,10 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 			}
 		})
 		if err != nil {
-			goLog.Error(err)
+			graphLog.Error(err)
 		}
 		if err := carFetchingExch.Close(); err != nil {
-			goLog.Error(err)
+			graphLog.Error(err)
 		}
 		doneWithFetcher <- struct{}{}
 		close(doneWithFetcher)
@@ -214,7 +218,7 @@ func (api *GraphGateway) notifyAllOngoingRequests(ctx context.Context, blks ...b
 	for n := range api.notifiers {
 		err := n.NotifyNewBlocks(ctx, blks...)
 		if err != nil {
-			goLog.Error(fmt.Errorf("notifyAllOngoingRequests failed: %w", err))
+			graphLog.Error(fmt.Errorf("notifyAllOngoingRequests failed: %w", err))
 		}
 	}
 	api.lk.RUnlock()
@@ -489,7 +493,7 @@ func (f *handoffExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block
 
 	select {
 	case <-f.handoffCh:
-		goLog.Infof("needed to use use a backup fetcher for cid %s", c)
+		graphLog.Infof("needed to use use a backup fetcher for cid %s", c)
 		return f.followupExchange.GetBlock(ctx, c)
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -529,10 +533,10 @@ func (f *handoffExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan
 						newCidArr = append(newCidArr, c)
 					}
 				}
-				goLog.Infof("needed to use use a backup fetcher for cids %v", newCidArr)
+				graphLog.Infof("needed to use use a backup fetcher for cids %v", newCidArr)
 				fch, err := f.followupExchange.GetBlocks(ctx, newCidArr)
 				if err != nil {
-					goLog.Error(fmt.Errorf("error getting blocks from followup exchange %w", err))
+					graphLog.Error(fmt.Errorf("error getting blocks from followup exchange %w", err))
 					return
 				}
 				for cs.Len() < len(cids) {
