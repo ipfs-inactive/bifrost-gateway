@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/filecoin-saturn/caboose"
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
+	blockstore "github.com/ipfs/boxo/blockstore"
 )
 
 const (

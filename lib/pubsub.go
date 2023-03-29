@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	pubsub "github.com/cskr/pubsub"
-	blocks "github.com/ipfs/go-libipfs/blocks"
+	blocks "github.com/ipfs/go-block-format"
 )
 
 // Note: blantantly copied from boxo/bitswap internals https://github.com/ipfs/boxo/blob/664b3e5ee4a997c67909da9b017a28efa40cc8ae/bitswap/client/internal/notifications/notifications.go

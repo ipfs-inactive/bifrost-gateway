@@ -5,9 +5,10 @@ import (
 	"errors"
 
 	"github.com/ipfs/go-cid"
-	blockstore "github.com/ipfs/go-ipfs-blockstore"
 	format "github.com/ipfs/go-ipld-format"
-	"github.com/ipfs/go-libipfs/blocks"
+
+	blockstore "github.com/ipfs/boxo/blockstore"
+	"github.com/ipfs/go-block-format"
 	golog "github.com/ipfs/go-log/v2"
 
 	lru "github.com/hashicorp/golang-lru/v2"

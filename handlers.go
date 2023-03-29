@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"os"
 	"runtime"
 	"strconv"
 	"time"
@@ -13,10 +14,10 @@ import (
 	"github.com/ipfs/bifrost-gateway/lib"
 
 	"github.com/filecoin-saturn/caboose"
-	"github.com/ipfs/go-blockservice"
-	bstore "github.com/ipfs/go-ipfs-blockstore"
-	"github.com/ipfs/go-libipfs/gateway"
-	"github.com/ipfs/interface-go-ipfs-core/path"
+	"github.com/ipfs/boxo/blockservice"
+	bstore "github.com/ipfs/boxo/blockstore"
+	"github.com/ipfs/boxo/coreiface/path"
+	"github.com/ipfs/boxo/gateway"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -40,6 +41,20 @@ func makeMetricsAndDebuggingHandler(port int) (*http.Server, error) {
 		Handler: mux,
 		Addr:    ":" + strconv.Itoa(port),
 	}, nil
+}
+
+func withConnect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ServeMux does not support requests with CONNECT method,
+		// so we need to handle them separately
+		// https://golang.org/src/net/http/request.go#L111
+		if r.Method == http.MethodConnect {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func withRequestLogger(next http.Handler) http.Handler {
@@ -120,6 +135,15 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 		},
 	}
 
+	// If we're doing tests, ensure the right public gateways are enabled.
+	if os.Getenv("GATEWAY_CONFORMANCE_TEST") == "true" {
+		publicGateways["example.com"] = &gateway.Specification{
+			Paths:         []string{"/ipfs", "/ipns"},
+			NoDNSLink:     noDNSLink,
+			UseSubdomains: true,
+		}
+	}
+
 	// Creates metrics handler for total response size. Matches the same metrics
 	// from Kubo:
 	// https://github.com/ipfs/kubo/blob/e550d9e4761ea394357c413c02ade142c0dea88c/core/corehttp/metrics.go#L79-L152
@@ -136,7 +160,8 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	}
 
 	// Construct the HTTP handler for the gateway.
-	handler := http.Handler(gateway.WithHostname(mux, gwAPI, publicGateways, noDNSLink))
+	handler := withConnect(mux)
+	handler = http.Handler(gateway.WithHostname(handler, gwAPI, publicGateways, noDNSLink))
 	handler = promhttp.InstrumentHandlerResponseSize(sum, handler)
 
 	// Add logging

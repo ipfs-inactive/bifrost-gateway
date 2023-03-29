@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ipfs/go-libipfs/gateway"
+	"github.com/ipfs/boxo/gateway"
 	"github.com/stretchr/testify/assert"
 )
 
