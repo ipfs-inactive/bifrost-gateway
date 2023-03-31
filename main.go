@@ -67,6 +67,7 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		}
 
 		log.Printf("Starting %s %s", name, version)
+		registerVersionMetric(version)
 
 		cdns := newCachedDNS(dnsCacheRefreshInterval)
 		defer cdns.Close()

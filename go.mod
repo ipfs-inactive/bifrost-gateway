@@ -4,10 +4,10 @@ go 1.19
 
 require (
 	github.com/cskr/pubsub v1.0.2
-	github.com/filecoin-saturn/caboose v0.0.0-20230329185035-5b37545e2a41
+	github.com/filecoin-saturn/caboose v0.0.0-20230329203940-7c08345c244d
 	github.com/gogo/protobuf v1.3.2
 	github.com/hashicorp/golang-lru/v2 v2.0.1
-	github.com/ipfs/boxo v0.8.0-rc2.0.20230329082438-360b031ed895
+	github.com/ipfs/boxo v0.8.0-rc3.0.20230331021433-e49cc43d95ad
 	github.com/ipfs/go-block-format v0.1.2
 	github.com/ipfs/go-cid v0.4.0
 	github.com/ipfs/go-ipld-format v0.4.0

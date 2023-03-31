@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/filecoin-saturn/caboose"
@@ -30,10 +32,11 @@ import (
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multicodec"
 	"github.com/multiformats/go-multihash"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/multierr"
 )
 
-var graphLog = golog.Logger("bifrost-gateway:graph-backend")
+var graphLog = golog.Logger("graph-gateway")
 
 // type DataCallback = func(resource string, reader io.Reader) error
 // TODO: Don't use a caboose type, perhaps ask them to use a type alias instead of a type
@@ -89,6 +92,17 @@ type GraphGateway struct {
 
 	lk        sync.RWMutex
 	notifiers map[Notifier]struct{}
+	metrics   *GraphGatewayMetrics
+}
+
+type GraphGatewayMetrics struct {
+	carFetchAttemptMetric      prometheus.Counter
+	carBlocksFetchedMetric     prometheus.Counter
+	blockRecoveryAttemptMetric prometheus.Counter
+	carParamsMetric            *prometheus.CounterVec
+
+	// TODO: what to measure here?
+	//fetchParamsMetric *prometheus.CounterVec
 }
 
 func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ...GraphGatewayOption) (*GraphGateway, error) {
@@ -138,7 +152,64 @@ func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ..
 		namesys:      ns,
 		bstore:       bs,
 		notifiers:    make(map[Notifier]struct{}),
+		metrics:      registerGraphGatewayMetrics(),
 	}, nil
+}
+
+func registerGraphGatewayMetrics() *GraphGatewayMetrics {
+
+	// How many CAR Fetch attempts we had? Need this to calculate % of various graph request types.
+	// We only count attempts here, because success/failure with/without retries are provided by caboose:
+	// - ipfs_caboose_fetch_duration_car_success_count
+	// - ipfs_caboose_fetch_duration_car_failure_count
+	// - ipfs_caboose_fetch_duration_car_peer_success_count
+	// - ipfs_caboose_fetch_duration_car_peer_failure_count
+	carFetchAttemptMetric := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "ipfs",
+		Subsystem: "gw_graph_backend",
+		Name:      "car_fetch_attempts",
+		Help:      "The number of times a CAR fetch was attempted by IPFSBackend.",
+	})
+	prometheus.MustRegister(carFetchAttemptMetric)
+
+	// How many blocks were read via CARs?
+	// Need this as a baseline to reason about error ratio vs raw_block_recovery_attempts.
+	carBlocksFetchedMetric := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "ipfs",
+		Subsystem: "gw_graph_backend",
+		Name:      "car_blocks_fetched",
+		Help:      "The number of blocks successfully read via CAR fetch.",
+	})
+	prometheus.MustRegister(carBlocksFetchedMetric)
+
+	// How many times CAR response was not enough or just failed, and we had to read a block via ?format=raw
+	// We only count attempts here, because success/failure with/without retries are provided by caboose:
+	// - ipfs_caboose_fetch_duration_block_success_count
+	// - ipfs_caboose_fetch_duration_block_failure_count
+	// - ipfs_caboose_fetch_duration_block_peer_success_count
+	// - ipfs_caboose_fetch_duration_block_peer_failure_count
+	blockRecoveryAttemptMetric := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "ipfs",
+		Subsystem: "gw_graph_backend",
+		Name:      "raw_block_recovery_attempts",
+		Help:      "The number of ?format=raw  block fetch attempts due to GraphGateway failure (CAR fetch error, missing block in CAR response, or a block evicted from cache too soon).",
+	})
+	prometheus.MustRegister(blockRecoveryAttemptMetric)
+
+	carParamsMetric := prometheus.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "ipfs",
+		Subsystem: "gw_graph_backend",
+		Name:      "car_fetch_params",
+		Help:      "How many times specific CAR parameter was used during CAR data fetch.",
+	}, []string{"depth", "bytes"})
+	prometheus.MustRegister(carParamsMetric)
+
+	return &GraphGatewayMetrics{
+		carFetchAttemptMetric,
+		carBlocksFetchedMetric,
+		blockRecoveryAttemptMetric,
+		carParamsMetric,
+	}
 }
 
 /*
@@ -159,18 +230,21 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 		startingExchange: carFetchingExch,
 		followupExchange: &blockFetcherExchWrapper{api.blockFetcher},
 		handoffCh:        doneWithFetcher,
+		metrics:          api.metrics,
 	}
 
 	api.lk.Lock()
 	api.notifiers[exch] = struct{}{}
 	api.lk.Unlock()
 
-	go func() {
+	go func(metrics *GraphGatewayMetrics) {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Println("Recovered fetcher error", r)
+				// TODO: move to Debugw?
+				graphLog.Errorw("Recovered fetcher error", "error", r)
 			}
 		}()
+		metrics.carFetchAttemptMetric.Inc()
 		err := api.fetcher.Fetch(ctx, path, func(resource string, reader io.Reader) error {
 			cr, err := car.NewCarReader(reader)
 			if err != nil {
@@ -187,18 +261,21 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 				if err := bstore.Put(ctx, blk); err != nil {
 					return err
 				}
+				metrics.carBlocksFetchedMetric.Inc()
 				api.notifyAllOngoingRequests(ctx, blk)
 			}
 		})
 		if err != nil {
-			graphLog.Error(err)
+			// TODO: move to debug?
+			graphLog.Errorw("car Fetch failed", "error", err)
 		}
 		if err := carFetchingExch.Close(); err != nil {
-			graphLog.Error(err)
+			// TODO: move to debug?
+			graphLog.Errorw("carFetchingExch.Close()", "error", err)
 		}
 		doneWithFetcher <- struct{}{}
 		close(doneWithFetcher)
-	}()
+	}(api.metrics)
 
 	bserv := blockservice.New(bstore, exch)
 	blkgw, err := gateway.NewBlocksGateway(bserv)
@@ -218,7 +295,7 @@ func (api *GraphGateway) notifyAllOngoingRequests(ctx context.Context, blks ...b
 	for n := range api.notifiers {
 		err := n.NotifyNewBlocks(ctx, blks...)
 		if err != nil {
-			graphLog.Error(fmt.Errorf("notifyAllOngoingRequests failed: %w", err))
+			graphLog.Errorw("notifyAllOngoingRequests failed", "error", err)
 		}
 	}
 	api.lk.RUnlock()
@@ -264,6 +341,7 @@ func wrapNodeWithClose[T files.Node](node T, closeFn func()) (T, error) {
 }
 
 func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, *gateway.GetResponse, error) {
+	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "1", "bytes": ""}).Inc()
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
@@ -277,9 +355,34 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath) (g
 	return md, gr, err
 }
 
-func (api *GraphGateway) GetRange(ctx context.Context, path gateway.ImmutablePath, getRange ...gateway.GetRange) (gateway.ContentPathMetadata, files.File, error) {
-	// TODO: actually implement ranges
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=1")
+func (api *GraphGateway) GetRange(ctx context.Context, path gateway.ImmutablePath, httpRanges ...gateway.GetRange) (gateway.ContentPathMetadata, files.File, error) {
+	rangeCount := len(httpRanges)
+	api.metrics.carParamsMetric.With(prometheus.Labels{
+		"depth": "1",
+		"bytes": fmt.Sprintf("(request ranges: %d)", rangeCount), // we dont pass specific ranges, we want deterministic number of CounterVec labels
+	}).Inc()
+
+	carParams := "?format=car&depth=1"
+
+	// TODO: refactor this if we ever merge Get and GetRange
+	if rangeCount > 0 {
+
+		bytesBuilder := strings.Builder{}
+		bytesBuilder.WriteString("&bytes=")
+		for i, r := range httpRanges {
+			bytesBuilder.WriteString(strconv.FormatUint(r.From, 10))
+			bytesBuilder.WriteString("-")
+			if r.To != nil {
+				bytesBuilder.WriteString(strconv.FormatInt(*r.To, 10))
+			}
+			if i != rangeCount-1 {
+				bytesBuilder.WriteString(",")
+			}
+		}
+		carParams += bytesBuilder.String()
+	}
+
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+carParams)
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -295,6 +398,7 @@ func (api *GraphGateway) GetRange(ctx context.Context, path gateway.ImmutablePat
 }
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
+	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "all", "bytes": ""}).Inc()
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=all")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
@@ -311,6 +415,8 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 }
 
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
+	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "0", "bytes": ""}).Inc()
+	// TODO: if path is `/ipfs/cid`, we should use ?format=raw
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
@@ -327,6 +433,10 @@ func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePat
 }
 
 func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
+	api.metrics.carParamsMetric.With(prometheus.Labels{
+		"depth": "",
+		"bytes": "0:1023 (Head)",
+	}).Inc()
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&bytes=0:1023")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
@@ -343,6 +453,7 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 }
 
 func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, error) {
+	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "0", "bytes": ""}).Inc()
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, err
@@ -352,6 +463,7 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 }
 
 func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, io.ReadCloser, <-chan error, error) {
+	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "", "bytes": ""}).Inc()
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, nil, err
@@ -479,6 +591,7 @@ var _ exchange.Interface = (*inboundBlockExchange)(nil)
 type handoffExchange struct {
 	startingExchange, followupExchange exchange.Interface
 	handoffCh                          <-chan struct{}
+	metrics                            *GraphGatewayMetrics
 }
 
 func (f *handoffExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
@@ -493,7 +606,8 @@ func (f *handoffExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block
 
 	select {
 	case <-f.handoffCh:
-		graphLog.Infof("needed to use use a backup fetcher for cid %s", c)
+		graphLog.Debugw("switching to backup block fetcher", "cid", c)
+		f.metrics.blockRecoveryAttemptMetric.Inc()
 		return f.followupExchange.GetBlock(ctx, c)
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -533,10 +647,11 @@ func (f *handoffExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan
 						newCidArr = append(newCidArr, c)
 					}
 				}
-				graphLog.Infof("needed to use use a backup fetcher for cids %v", newCidArr)
+				graphLog.Debugw("needed to use use a backup fetcher for cids", "cids", newCidArr)
+				f.metrics.blockRecoveryAttemptMetric.Add(float64(len(newCidArr)))
 				fch, err := f.followupExchange.GetBlocks(ctx, newCidArr)
 				if err != nil {
-					graphLog.Error(fmt.Errorf("error getting blocks from followup exchange %w", err))
+					graphLog.Errorw("error getting blocks from followupExchange", "error", err)
 					return
 				}
 				for cs.Len() < len(cids) {
