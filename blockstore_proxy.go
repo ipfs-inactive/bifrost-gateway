@@ -12,7 +12,7 @@ import (
 
 	"github.com/ipfs/bifrost-gateway/lib"
 	blockstore "github.com/ipfs/boxo/blockstore"
-	"github.com/ipfs/go-block-format"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 )
 

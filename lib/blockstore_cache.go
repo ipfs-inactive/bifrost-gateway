@@ -19,7 +19,7 @@ import (
 
 const DefaultCacheBlockStoreSize = 1024
 
-var cacheLog = golog.Logger("cache-blockstore")
+var cacheLog = golog.Logger("cache/block")
 
 func NewCacheBlockStore(size int) (blockstore.Blockstore, error) {
 	c, err := lru.New2Q[string, []byte](size)

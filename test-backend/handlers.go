@@ -4,6 +4,15 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"runtime/debug"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/ipfs/boxo/fetcher"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/gateway"
@@ -13,7 +22,7 @@ import (
 	unixfile "github.com/ipfs/boxo/ipld/unixfs/file"
 	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/boxo/path/resolver"
-	"github.com/ipfs/go-block-format"
+	blocks "github.com/ipfs/go-block-format"
 	format "github.com/ipfs/go-ipld-format"
 	"github.com/ipfs/go-unixfsnode"
 	dagpb "github.com/ipld/go-codec-dagpb"
@@ -23,14 +32,6 @@ import (
 	"github.com/ipld/go-ipld-prime/schema"
 	"github.com/ipld/go-ipld-prime/traversal"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
-	"io"
-	"net/http"
-	"net/url"
-	"runtime/debug"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -189,9 +190,9 @@ func simpleSelectorToCar(ctx context.Context, bsrv blockservice.BlockService, p 
 	if hasDepth && !(depthStr == "0" || depthStr == "1" || depthStr == "all") {
 		return nil, fmt.Errorf("depth type: %s not supported", depthStr)
 	}
-	var getRange *gateway.GetRange
+	var getRange *gateway.ByteRange
 	if hasRange {
-		getRange, err = rangeStrToGetRange(rangeStr)
+		getRange, err = rangeStrToByteRange(rangeStr)
 		if err != nil {
 			return nil, err
 		}
@@ -478,7 +479,7 @@ func blockOpener(ctx context.Context, ng format.NodeGetter) ipld.BlockReadOpener
 var _ fetcher.Fetcher = (*nodeGetterFetcherSingleUseFactory)(nil)
 var _ fetcher.Factory = (*nodeGetterFetcherSingleUseFactory)(nil)
 
-func rangeStrToGetRange(rangeStr string) (*gateway.GetRange, error) {
+func rangeStrToByteRange(rangeStr string) (*gateway.ByteRange, error) {
 	rangeElems := strings.Split(rangeStr, ":")
 	if len(rangeElems) > 2 {
 		return nil, fmt.Errorf("invalid range")
@@ -489,7 +490,7 @@ func rangeStrToGetRange(rangeStr string) (*gateway.GetRange, error) {
 	}
 
 	if rangeElems[1] == "*" {
-		return &gateway.GetRange{
+		return &gateway.ByteRange{
 			From: first,
 			To:   nil,
 		}, nil
@@ -509,7 +510,7 @@ func rangeStrToGetRange(rangeStr string) (*gateway.GetRange, error) {
 		return nil, fmt.Errorf("invalid range")
 	}
 
-	return &gateway.GetRange{
+	return &gateway.ByteRange{
 		From: first,
 		To:   &second,
 	}, nil
