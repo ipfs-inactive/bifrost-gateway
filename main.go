@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ipfs/bifrost-gateway/lib"
+
 	blockstore "github.com/ipfs/boxo/blockstore"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/spf13/cobra"
@@ -29,12 +31,12 @@ func main() {
 const (
 	EnvKuboRPC        = "KUBO_RPC_URL"
 	EnvBlockCacheSize = "BLOCK_CACHE_SIZE"
+	EnvGraphBackend   = "GRAPH_BACKEND"
 )
 
 func init() {
 	rootCmd.Flags().Int("gateway-port", 8081, "gateway port")
 	rootCmd.Flags().Int("metrics-port", 8041, "metrics port")
-
 }
 
 var rootCmd = &cobra.Command{
@@ -52,14 +54,20 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		// Get env variables.
 		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, "")
 		proxyGateway := getEnvs(EnvProxyGateway, "")
-		kuboRPC := getEnvs(EnvKuboRPC, DefaultKuboPRC)
+		kuboRPC := getEnvs(EnvKuboRPC, DefaultKuboRPC)
 
-		blockCacheSize, err := getEnvInt(EnvBlockCacheSize, DefaultCacheBlockStoreSize)
+		blockCacheSize, err := getEnvInt(EnvBlockCacheSize, lib.DefaultCacheBlockStoreSize)
+		if err != nil {
+			return err
+		}
+
+		useGraphBackend, err := getEnvBool(EnvGraphBackend, false)
 		if err != nil {
 			return err
 		}
 
 		log.Printf("Starting %s %s", name, version)
+		registerVersionMetric(version)
 
 		cdns := newCachedDNS(dnsCacheRefreshInterval)
 		defer cdns.Close()
@@ -86,12 +94,12 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 			log.Fatalf("Unable to start. bifrost-gateway requires either PROXY_GATEWAY_URL or STRN_ORCHESTRATOR_URL to be set.\n\nRead docs at https://github.com/ipfs/bifrost-gateway/blob/main/docs/environment-variables.md\n\n")
 		}
 
-		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize, cdns)
+		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize, cdns, useGraphBackend)
 		if err != nil {
 			return err
 		}
 
-		metricsSrv, err := makeMetricsHandler(metricsPort)
+		metricsSrv, err := makeMetricsAndDebuggingHandler(metricsPort)
 		if err != nil {
 			return err
 		}
@@ -162,4 +170,12 @@ func getEnvInt(key string, defaultValue int) (int, error) {
 		return defaultValue, nil
 	}
 	return strconv.Atoi(value)
+}
+
+func getEnvBool(key string, defaultValue bool) (bool, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue, nil
+	}
+	return strconv.ParseBool(value)
 }

@@ -10,8 +10,9 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/ipfs/bifrost-gateway/lib"
 	blockstore "github.com/ipfs/boxo/blockstore"
-	"github.com/ipfs/go-block-format"
+	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 )
 
@@ -25,7 +26,7 @@ const (
 	EnvProxyGateway = "PROXY_GATEWAY_URL"
 
 	DefaultProxyGateway = "http://127.0.0.1:8080"
-	DefaultKuboPRC      = "http://127.0.0.1:5001"
+	DefaultKuboRPC      = "http://127.0.0.1:5001"
 )
 
 type proxyBlockStore struct {
@@ -34,6 +35,37 @@ type proxyBlockStore struct {
 	validate   bool
 	rand       *rand.Rand
 }
+
+func (ps *proxyBlockStore) Fetch(ctx context.Context, path string, cb lib.DataCallback) error {
+	u, err := url.Parse(fmt.Sprintf("%s%s", ps.getRandomGatewayURL(), path))
+	if err != nil {
+		return err
+	}
+	goLog.Debugw("car fetch", "url", u)
+	resp, err := ps.httpClient.Do(&http.Request{
+		Method: http.MethodGet,
+		URL:    u,
+		Header: http.Header{
+			"Accept": []string{"application/vnd.ipld.car"},
+		},
+	})
+	if err != nil {
+		return err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("http error from car gateway: %s", resp.Status)
+	}
+
+	err = cb(path, resp.Body)
+	if err != nil {
+		resp.Body.Close()
+		return err
+	}
+	return resp.Body.Close()
+}
+
+var _ lib.CarFetcher = (*proxyBlockStore)(nil)
 
 func newProxyBlockStore(gatewayURL []string, cdns *cachedDNS) blockstore.Blockstore {
 	s := rand.NewSource(time.Now().Unix())
@@ -71,6 +103,7 @@ func (ps *proxyBlockStore) fetch(ctx context.Context, c cid.Cid) (blocks.Block, 
 	if err != nil {
 		return nil, err
 	}
+	goLog.Debugw("raw fetch", "url", u)
 	resp, err := ps.httpClient.Do(&http.Request{
 		Method: http.MethodGet,
 		URL:    u,

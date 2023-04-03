@@ -5,8 +5,13 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"time"
+
+	_ "net/http/pprof"
+
+	"github.com/ipfs/bifrost-gateway/lib"
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/boxo/blockservice"
@@ -17,7 +22,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func makeMetricsHandler(port int) (*http.Server, error) {
+func makeMetricsAndDebuggingHandler(port int) (*http.Server, error) {
 	mux := http.NewServeMux()
 
 	gatherers := prometheus.Gatherers{
@@ -26,6 +31,11 @@ func makeMetricsHandler(port int) (*http.Server, error) {
 	}
 	options := promhttp.HandlerOpts{}
 	mux.Handle("/debug/metrics/prometheus", promhttp.HandlerFor(gatherers, options))
+	mux.Handle("/debug/vars", http.DefaultServeMux)
+	mux.Handle("/debug/pprof/", http.DefaultServeMux)
+	mux.Handle("/debug/stack", http.DefaultServeMux)
+	MutexFractionOption("/debug/pprof-mutex/", mux)
+	BlockProfileRateOption("/debug/pprof-block/", mux)
 
 	return &http.Server{
 		Handler: mux,
@@ -55,15 +65,12 @@ func withRequestLogger(next http.Handler) http.Handler {
 	})
 }
 
-func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS) (*http.Server, error) {
-	// Sets up an exchange based on the given Block Store
-	exch, err := newExchange(bs)
-	if err != nil {
-		return nil, err
-	}
+func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphBackend bool) (*http.Server, error) {
+	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
+	routing := newProxyRouting(kuboRPC, cdns)
 
 	// Sets up a cache to store blocks in
-	cacheBlockStore, err := newCacheBlockStore(blockCacheSize)
+	cacheBlockStore, err := lib.NewCacheBlockStore(blockCacheSize)
 	if err != nil {
 		return nil, err
 	}
@@ -71,16 +78,33 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	// Set up support for identity hashes (https://github.com/ipfs/bifrost-gateway/issues/38)
 	cacheBlockStore = bstore.NewIdStore(cacheBlockStore)
 
-	// Sets up a blockservice which tries the cache and falls back to the exchange
-	blockService := blockservice.New(cacheBlockStore, exch)
+	var gwAPI gateway.IPFSBackend
+	if !useGraphBackend {
+		// Sets up an exchange based on the given Block Store
+		exch, err := newExchange(bs)
+		if err != nil {
+			return nil, err
+		}
 
-	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
-	routing := newProxyRouting(kuboRPC, cdns)
+		// Sets up a blockservice which tries the cache and falls back to the exchange
+		blockService := blockservice.New(cacheBlockStore, exch)
 
-	// Creates the gateway with the block service and the routing.
-	gwAPI, err := gateway.NewBlocksGateway(blockService, gateway.WithValueStore(routing))
-	if err != nil {
-		return nil, err
+		// Creates the gateway with the block service and the routing.
+		gwAPI, err = gateway.NewBlocksGateway(blockService, gateway.WithValueStore(routing))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Sets up an exchange based on the given Block Store
+		exch, err := newExchange(bs)
+		if err != nil {
+			return nil, err
+		}
+
+		gwAPI, err = lib.NewGraphGatewayBackend(bs.(lib.CarFetcher), exch, lib.WithValueStore(routing), lib.WithBlockstore(cacheBlockStore))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	headers := map[string][]string{}
@@ -209,5 +233,67 @@ func newKuboRPCHandler(endpoints []string) http.Handler {
 		w.Write([]byte("The /api/v0 Kubo RPC is now discontinued on this server as it is not part of the gateway specification. If you need this API, please self-host a Kubo instance yourself: https://docs.ipfs.tech/install/command-line/"))
 	})
 
+	return mux
+}
+
+// MutexFractionOption allows to set runtime.SetMutexProfileFraction via HTTP
+// using POST request with parameter 'fraction'.
+func MutexFractionOption(path string, mux *http.ServeMux) *http.ServeMux {
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		asfr := r.Form.Get("fraction")
+		if len(asfr) == 0 {
+			http.Error(w, "parameter 'fraction' must be set", http.StatusBadRequest)
+			return
+		}
+
+		fr, err := strconv.Atoi(asfr)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		runtime.SetMutexProfileFraction(fr)
+	})
+
+	return mux
+}
+
+// BlockProfileRateOption allows to set runtime.SetBlockProfileRate via HTTP
+// using POST request with parameter 'rate'.
+// The profiler tries to sample 1 event every <rate> nanoseconds.
+// If rate == 1, then the profiler samples every blocking event.
+// To disable, set rate = 0.
+func BlockProfileRateOption(path string, mux *http.ServeMux) *http.ServeMux {
+	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "only POST allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		rateStr := r.Form.Get("rate")
+		if len(rateStr) == 0 {
+			http.Error(w, "parameter 'rate' must be set", http.StatusBadRequest)
+			return
+		}
+
+		rate, err := strconv.Atoi(rateStr)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		runtime.SetBlockProfileRate(rate)
+	})
 	return mux
 }

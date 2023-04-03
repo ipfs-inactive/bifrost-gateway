@@ -1,23 +1,27 @@
-package main
+package lib
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
-	"github.com/prometheus/client_golang/prometheus"
 
 	blockstore "github.com/ipfs/boxo/blockstore"
-	"github.com/ipfs/go-block-format"
+	blocks "github.com/ipfs/go-block-format"
+	golog "github.com/ipfs/go-log/v2"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+	"github.com/prometheus/client_golang/prometheus"
 	uatomic "go.uber.org/atomic"
 	"go.uber.org/zap/zapcore"
 )
 
 const DefaultCacheBlockStoreSize = 1024
 
-func newCacheBlockStore(size int) (blockstore.Blockstore, error) {
+var cacheLog = golog.Logger("cache/block")
+
+func NewCacheBlockStore(size int) (blockstore.Blockstore, error) {
 	c, err := lru.New2Q[string, []byte](size)
 	if err != nil {
 		return nil, err
@@ -76,16 +80,16 @@ func (l *cacheBlockStore) Get(ctx context.Context, c cid.Cid) (blocks.Block, err
 
 	blkData, found := l.cache.Get(string(c.Hash()))
 	if !found {
-		if goLog.Level().Enabled(zapcore.DebugLevel) {
-			goLog.Debugw("block not found in cache", "cid", c.String())
+		if cacheLog.Level().Enabled(zapcore.DebugLevel) {
+			cacheLog.Debugw("block not found in cache", "cid", c.String())
 		}
 		return nil, format.ErrNotFound{Cid: c}
 	}
 
 	// It's a HIT!
 	l.cacheHitsMetric.Add(1)
-	if goLog.Level().Enabled(zapcore.DebugLevel) {
-		goLog.Debugw("block found in cache", "cid", c.String())
+	if cacheLog.Level().Enabled(zapcore.DebugLevel) {
+		cacheLog.Debugw("block found in cache", "cid", c.String())
 	}
 
 	if l.rehash.Load() {
@@ -126,7 +130,7 @@ func (l *cacheBlockStore) PutMany(ctx context.Context, blks []blocks.Block) erro
 }
 
 func (l *cacheBlockStore) AllKeysChan(ctx context.Context) (<-chan cid.Cid, error) {
-	return nil, errNotImplemented
+	return nil, errors.New("not implemented")
 }
 
 func (l *cacheBlockStore) HashOnRead(enabled bool) {
