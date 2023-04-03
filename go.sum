@@ -65,8 +65,8 @@ github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1m
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/felixge/httpsnoop v1.0.0 h1:gh8fMGz0rlOv/1WmRZm7OgncIOTsAj21iNJot48omJQ=
 github.com/felixge/httpsnoop v1.0.0/go.mod h1:3+D9sFq0ahK/JeJPhCBUV1xlf4/eIYrUQaxulT0VzX8=
-github.com/filecoin-saturn/caboose v0.0.0-20230329203940-7c08345c244d h1:ok/4Ffp2ETy6l5kBRUumvxzGz/Hxqq2iTfmGLslZbBc=
-github.com/filecoin-saturn/caboose v0.0.0-20230329203940-7c08345c244d/go.mod h1:u8END6RLUG9ZWudtVHAOOg7ptGiAgKjf/QnNOUOC160=
+github.com/filecoin-saturn/caboose v0.0.0-20230331212405-5b42e9465c12 h1:C+w5e4lwsiFJczrNJrnPeNQX12bdKkjPJSGl+vSCPNU=
+github.com/filecoin-saturn/caboose v0.0.0-20230331212405-5b42e9465c12/go.mod h1:N/gB9x2GNiD05Yl0+7/VS+3H2gXc6CTsu/QhdoyvYeQ=
 github.com/flynn/go-shlex v0.0.0-20150515145356-3f9db97f8568/go.mod h1:xEzjJPgXI435gkrCt3MPfRiAkVrwSbHsst4LCFVfpJc=
 github.com/flynn/noise v1.0.0 h1:DlTHqmzmvcEiKj+4RYo/imoswx/4r6iBlCMfVtrMXpQ=
 github.com/flynn/noise v1.0.0/go.mod h1:xbMo+0i6+IGbYdJhF31t2eR1BIU0CYc12+BNAKwUTag=
