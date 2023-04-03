@@ -18,6 +18,7 @@ import (
 	bstore "github.com/ipfs/boxo/blockstore"
 	"github.com/ipfs/boxo/coreiface/path"
 	"github.com/ipfs/boxo/gateway"
+	servertiming "github.com/mitchellh/go-server-timing"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -162,6 +163,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	// Construct the HTTP handler for the gateway.
 	handler := withConnect(mux)
 	handler = http.Handler(gateway.WithHostname(handler, gwAPI, publicGateways, noDNSLink))
+	handler = servertiming.Middleware(handler, nil)
 	handler = promhttp.InstrumentHandlerResponseSize(sum, handler)
 
 	// Add logging
