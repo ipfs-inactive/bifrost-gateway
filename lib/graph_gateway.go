@@ -345,18 +345,16 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 	carParams := "?format=car&depth=1"
 
 	// fetch CAR with &bytes= to get minimal set of blocks for the request
+	// Note: majority of requests have 0 or max 1 ranges. if there are more ranges than one,
+	// that is a niche edge cache we don't prefetch as CAR and use fallback blockstore instead.
 	if rangeCount > 0 {
 		bytesBuilder := strings.Builder{}
 		bytesBuilder.WriteString("&bytes=")
-		for i, r := range byteRanges {
-			bytesBuilder.WriteString(strconv.FormatUint(r.From, 10))
-			bytesBuilder.WriteString("-")
-			if r.To != nil {
-				bytesBuilder.WriteString(strconv.FormatInt(*r.To, 10))
-			}
-			if i != rangeCount-1 {
-				bytesBuilder.WriteString(",")
-			}
+		r := byteRanges[0]
+		bytesBuilder.WriteString(strconv.FormatUint(r.From, 10))
+		bytesBuilder.WriteString(":")
+		if r.To != nil {
+			bytesBuilder.WriteString(strconv.FormatInt(*r.To, 10))
 		}
 		carParams += bytesBuilder.String()
 	}
