@@ -7,7 +7,7 @@ require (
 	github.com/filecoin-saturn/caboose v0.0.0-20230329203940-7c08345c244d
 	github.com/gogo/protobuf v1.3.2
 	github.com/hashicorp/golang-lru/v2 v2.0.1
-	github.com/ipfs/boxo v0.8.0-rc3.0.20230401000028-de9daf5fc542
+	github.com/ipfs/boxo v0.8.0-rc4
 	github.com/ipfs/go-block-format v0.1.2
 	github.com/ipfs/go-cid v0.4.0
 	github.com/ipfs/go-ipld-format v0.4.0
