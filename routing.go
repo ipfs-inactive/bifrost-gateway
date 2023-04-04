@@ -10,7 +10,6 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	ic "github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type proxyRouting struct {
@@ -35,7 +35,7 @@ func newProxyRouting(kuboRPC []string, cdns *cachedDNS) routing.ValueStore {
 	return &proxyRouting{
 		kuboRPC: kuboRPC,
 		httpClient: &http.Client{
-			Transport: &customTransport{
+			Transport: otelhttp.NewTransport(&customTransport{
 				// Roundtripper with increased defaults than http.Transport such that retrieving
 				// multiple lookups concurrently is fast.
 				RoundTripper: &http.Transport{
@@ -45,7 +45,7 @@ func newProxyRouting(kuboRPC []string, cdns *cachedDNS) routing.ValueStore {
 					IdleConnTimeout:     90 * time.Second,
 					DialContext:         cdns.dialWithCachedDNS,
 				},
-			},
+			}),
 		},
 		rand: rand,
 	}
@@ -88,22 +88,20 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err e
 
 	key = "/ipns/" + peer.ToCid(id).String()
 
-	u, err := url.Parse(fmt.Sprintf("%s/api/v0/dht/get?arg=%s", ps.getRandomKuboURL(), key))
+	urlStr := fmt.Sprintf("%s/api/v0/dht/get?arg=%s", ps.getRandomKuboURL(), key)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	goLog.Debugw("routing proxy fetch", "key", key, "from", u.String())
+	goLog.Debugw("routing proxy fetch", "key", key, "from", req.URL.String())
 	defer func() {
 		if err != nil {
-			goLog.Debugw("routing proxy fetch error", "key", key, "from", u.String(), "error", err.Error())
+			goLog.Debugw("routing proxy fetch error", "key", key, "from", req.URL.String(), "error", err.Error())
 		}
 	}()
 
-	resp, err := ps.httpClient.Do(&http.Request{
-		Method: http.MethodPost,
-		URL:    u,
-	})
+	resp, err := ps.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

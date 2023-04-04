@@ -13,6 +13,8 @@ import (
 	"sync"
 
 	"github.com/ipfs/bifrost-gateway/lib"
+	"go.opentelemetry.io/contrib/propagators/autoprop"
+	"go.opentelemetry.io/otel"
 
 	blockstore "github.com/ipfs/boxo/blockstore"
 	golog "github.com/ipfs/go-log/v2"
@@ -68,6 +70,16 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 
 		log.Printf("Starting %s %s", name, version)
 		registerVersionMetric(version)
+
+		tp, shutdown, err := newTracerProvider(cmd.Context())
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = shutdown(cmd.Context())
+		}()
+		otel.SetTracerProvider(tp)
+		otel.SetTextMapPropagator(autoprop.NewTextMapPropagator())
 
 		cdns := newCachedDNS(dnsCacheRefreshInterval)
 		defer cdns.Close()

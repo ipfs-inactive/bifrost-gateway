@@ -9,6 +9,7 @@ import (
 
 	"github.com/filecoin-saturn/caboose"
 	blockstore "github.com/ipfs/boxo/blockstore"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 const (
@@ -61,7 +62,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 
 	saturnRetrievalClient := &http.Client{
 		Timeout: caboose.DefaultSaturnCarRequestTimeout,
-		Transport: &customTransport{
+		Transport: otelhttp.NewTransport(&customTransport{
 			RoundTripper: &http.Transport{
 				// Increasing concurrency defaults from http.DefaultTransport
 				MaxIdleConns:        1000,
@@ -84,7 +85,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 					// ServerName:         "strn.pl",
 				},
 			},
-		},
+		}),
 	}
 
 	return caboose.NewCaboose(&caboose.Config{
