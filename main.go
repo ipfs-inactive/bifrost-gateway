@@ -111,7 +111,10 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		go func() {
 			defer wg.Done()
 
+			// log important configuration flags
 			log.Printf("%s: %d", EnvBlockCacheSize, blockCacheSize)
+			log.Printf("%s: %t", EnvGraphBackend, useGraphBackend)
+
 			log.Printf("Legacy RPC at /api/v0 (%s) provided by %s", EnvKuboRPC, strings.Join(kuboRPC, " "))
 			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
 			log.Printf("  Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
