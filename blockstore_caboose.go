@@ -50,7 +50,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 	}
 
 	saturnLoggerClient := &http.Client{
-		Timeout: caboose.DefaultSaturnLoggerRequestTimeout,
+		Timeout: caboose.DefaultSaturnOrchestratorRequestTimeout, // caboose does nto provide custom timeout for logger, reusing one for orchestrator
 		Transport: &customTransport{
 			AuthorizationBearerToken: os.Getenv(EnvSaturnLoggerSecret),
 			RoundTripper: &http.Transport{
