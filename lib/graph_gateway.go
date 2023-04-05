@@ -12,6 +12,7 @@ import (
 	"github.com/ipld/go-ipld-prime"
 	"github.com/ipld/go-ipld-prime/node/basicnode"
 	"github.com/ipld/go-ipld-prime/schema"
+	"github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	"io"
 	"net/http"
 	"runtime"
@@ -420,7 +421,7 @@ func (api *GraphGateway) tryLoadPathFromBlockstore(ctx context.Context, p gatewa
 	var lastPath ipld.Path
 	var lastLink ipld.Link
 	var requestPath string
-	pathSel := unixfsnode.UnixFSPathSelector(strings.Join(rem, "/"))
+	pathSel := pathAllSelector(rem)
 	if err := fetcherhelpers.BlockMatching(ctx, f, rootCidLink, pathSel, func(result fetcher.FetchResult) error {
 		lastPath = result.LastBlockPath
 		lastLink = result.LastBlockLink
@@ -862,3 +863,21 @@ func (b *blockFetcherExchWrapper) Close() error {
 }
 
 var _ exchange.Interface = (*blockFetcherExchWrapper)(nil)
+
+func pathAllSelector(path []string) ipld.Node {
+	ssb := builder.NewSelectorSpecBuilder(basicnode.Prototype.Any)
+	return pathSelector(path, ssb, func(p string, s builder.SelectorSpec) builder.SelectorSpec {
+		return ssb.ExploreUnion(
+			ssb.Matcher(),
+			ssb.ExploreFields(func(efsb builder.ExploreFieldsSpecBuilder) { efsb.Insert(p, s) }),
+		)
+	})
+}
+
+func pathSelector(path []string, ssb builder.SelectorSpecBuilder, reduce func(string, builder.SelectorSpec) builder.SelectorSpec) ipld.Node {
+	spec := ssb.Matcher()
+	for i := len(path) - 1; i >= 0; i-- {
+		spec = reduce(path[i], spec)
+	}
+	return spec.Node()
+}
