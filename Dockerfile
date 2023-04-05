@@ -1,4 +1,4 @@
-FROM golang:1.19-buster AS builder
+FROM golang:1.20-bullseye AS builder
 MAINTAINER IPFS Stewards <w3dt-stewards-ip@protocol.ai>
 
 # This dockerfile builds and runs bifrost-gateway
