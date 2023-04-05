@@ -422,30 +422,32 @@ func (api *GraphGateway) tryLoadPathFromBlockstore(ctx context.Context, p gatewa
 	var lastLink ipld.Link
 	var requestPath string
 	pathSel := pathAllSelector(rem)
-	if err := fetcherhelpers.BlockMatching(ctx, f, rootCidLink, pathSel, func(result fetcher.FetchResult) error {
+	err = fetcherhelpers.BlockMatching(ctx, f, rootCidLink, pathSel, func(result fetcher.FetchResult) error {
 		lastPath = result.LastBlockPath
 		lastLink = result.LastBlockLink
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		if !errors.Is(err, format.ErrNotFound{}) {
 			graphLog.Error(err)
 		}
 		if lastLink == nil {
 			return p.String(), nil
 		}
+	}
 
-		requestPath = fmt.Sprintf("/ipfs/%s", lastLink.(cidlink.Link).Cid)
-		for i, ps := range lastPath.Segments() {
-			if i >= len(rem) {
-				requestPath = requestPath + strings.Join(rem[i:], "/")
-				return requestPath, nil
-			}
-			if ps.String() != rem[i] {
-				graphLog.Error(fmt.Errorf("selector path did not match ipfs path: expected %q got %q", rem[i], ps))
-				return p.String(), nil
-			}
+	requestPath = fmt.Sprintf("/ipfs/%s", lastLink.(cidlink.Link).Cid)
+	for i, ps := range lastPath.Segments() {
+		if i >= len(rem) {
+			requestPath = requestPath + strings.Join(rem[i:], "/")
+			return requestPath, nil
+		}
+		if ps.String() != rem[i] {
+			graphLog.Error(fmt.Errorf("selector path did not match ipfs path: expected %q got %q", rem[i], ps))
+			return p.String(), nil
 		}
 	}
+
 	return requestPath, nil
 }
 
