@@ -101,8 +101,8 @@ type GraphGatewayMetrics struct {
 	blockRecoveryAttemptMetric prometheus.Counter
 	carParamsMetric            *prometheus.CounterVec
 
-	// TODO: what to measure here?
-	//fetchParamsMetric *prometheus.CounterVec
+	bytesRangeStartMetric prometheus.Histogram
+	bytesRangeSizeMetric  prometheus.Histogram
 }
 
 func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ...GraphGatewayOption) (*GraphGateway, error) {
@@ -204,11 +204,31 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 	}, []string{"depth", "ranges"}) // we use 'ranges' instead of 'bytes' here because we only caount the number of ranges present
 	prometheus.MustRegister(carParamsMetric)
 
+	bytesRangeStartMetric := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "ipfs",
+		Subsystem: "gw_graph_backend",
+		Name:      "range_request_start",
+		Help:      "Tracks where did the range request start.",
+		Buckets:   prometheus.ExponentialBuckets(1024, 2, 24), // 1024 bytes to 8 GiB
+	})
+	prometheus.MustRegister(bytesRangeStartMetric)
+
+	bytesRangeSizeMetric := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Namespace: "ipfs",
+		Subsystem: "gw_graph_backend",
+		Name:      "range_request_size",
+		Help:      "Tracks the size of range requests.",
+		Buckets:   prometheus.ExponentialBuckets(256*1024, 2, 10), // From 256KiB to 100MiB
+	})
+	prometheus.MustRegister(bytesRangeSizeMetric)
+
 	return &GraphGatewayMetrics{
 		carFetchAttemptMetric,
 		carBlocksFetchedMetric,
 		blockRecoveryAttemptMetric,
 		carParamsMetric,
+		bytesRangeStartMetric,
+		bytesRangeSizeMetric,
 	}
 }
 
@@ -351,12 +371,21 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 		bytesBuilder := strings.Builder{}
 		bytesBuilder.WriteString("&bytes=")
 		r := byteRanges[0]
+
 		bytesBuilder.WriteString(strconv.FormatUint(r.From, 10))
 		bytesBuilder.WriteString(":")
+
+		// TODO: move to boxo or to loadRequestIntoSharedBlockstoreAndBlocksGateway after we pass params in a humane way
+		api.metrics.bytesRangeStartMetric.Observe(float64(r.From))
+
 		if r.To != nil {
 			bytesBuilder.WriteString(strconv.FormatInt(*r.To, 10))
+
+			// TODO: move to boxo or to loadRequestIntoSharedBlockstoreAndBlocksGateway after we pass params in a humane way
+			api.metrics.bytesRangeSizeMetric.Observe(float64(*r.To) - float64(r.From) + 1)
 		}
 		carParams += bytesBuilder.String()
+
 	}
 
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+carParams)
@@ -410,7 +439,13 @@ func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePat
 
 func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "", "ranges": "1"}).Inc()
+
+	// TODO:  we probably want to move this either to boxo, or at least to loadRequestIntoSharedBlockstoreAndBlocksGateway
+	api.metrics.bytesRangeStartMetric.Observe(0)
+	api.metrics.bytesRangeSizeMetric.Observe(1024)
+
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&bytes=0:1023")
+
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
