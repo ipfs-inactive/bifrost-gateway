@@ -1,7 +1,12 @@
-FROM golang:1.20-bullseye AS builder
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:1.20-bullseye AS builder
 MAINTAINER IPFS Stewards <w3dt-stewards-ip@protocol.ai>
 
 # This dockerfile builds and runs bifrost-gateway
+
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
 
 ENV GOPATH      /go
 ENV SRC_PATH    $GOPATH/src/github.com/ipfs/bifrost-gateway
@@ -34,11 +39,11 @@ RUN go mod download
 
 COPY --chown=1000:users . $SRC_PATH
 RUN git config --global --add safe.directory /go/src/github.com/ipfs/bifrost-gateway
-RUN go install
+RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o $GOPATH/bin/bifrost-gateway
 
 
 #------------------------------------------------------
-FROM busybox:1-glibc
+FROM --platform=${BUILDPLATFORM:-linux/amd64} busybox:1-glibc
 MAINTAINER IPFS Stewards <w3dt-stewards-ip@protocol.ai>
 
 ENV GOPATH                 /go
