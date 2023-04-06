@@ -201,7 +201,7 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 		Subsystem: "gw_graph_backend",
 		Name:      "car_fetch_params",
 		Help:      "How many times specific CAR parameter was used during CAR data fetch.",
-	}, []string{"depth", "ranges"}) // we use 'ranges' instead of 'bytes' here because we only caount the number of ranges present
+	}, []string{"carScope", "ranges"}) // we use 'ranges' instead of 'bytes' here because we only caount the number of ranges present
 	prometheus.MustRegister(carParamsMetric)
 
 	bytesRangeStartMetric := prometheus.NewHistogram(prometheus.HistogramOpts{
@@ -360,9 +360,11 @@ func wrapNodeWithClose[T files.Node](node T, closeFn func()) (T, error) {
 
 func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, byteRanges ...gateway.ByteRange) (gateway.ContentPathMetadata, *gateway.GetResponse, error) {
 	rangeCount := len(byteRanges)
-	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "1", "ranges": strconv.Itoa(rangeCount)}).Inc()
+	api.metrics.carParamsMetric.With(prometheus.Labels{"carScope": "file", "ranges": strconv.Itoa(rangeCount)}).Inc()
 
-	carParams := "?format=car&depth=1"
+	// TODO: remove &depth=  from all CAR request after transition is done:
+	// https://github.com/ipfs/bifrost-gateway/issues/80
+	carParams := "?format=car&car-scope=file&depth=1"
 
 	// fetch CAR with &bytes= to get minimal set of blocks for the request
 	// Note: majority of requests have 0 or max 1 ranges. if there are more ranges than one,
@@ -403,8 +405,8 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 }
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "all", "ranges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=all")
+	api.metrics.carParamsMetric.With(prometheus.Labels{"carScope": "all", "ranges": "0"}).Inc()
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&car-scope=all&depth=all")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -420,9 +422,9 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 }
 
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
-	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "0", "ranges": "0"}).Inc()
+	api.metrics.carParamsMetric.With(prometheus.Labels{"carScope": "block", "ranges": "0"}).Inc()
 	// TODO: if path is `/ipfs/cid`, we should use ?format=raw
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&car-scope=block&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -438,13 +440,13 @@ func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePat
 }
 
 func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "", "ranges": "1"}).Inc()
+	api.metrics.carParamsMetric.With(prometheus.Labels{"carScope": "file", "ranges": "1"}).Inc()
 
 	// TODO:  we probably want to move this either to boxo, or at least to loadRequestIntoSharedBlockstoreAndBlocksGateway
 	api.metrics.bytesRangeStartMetric.Observe(0)
 	api.metrics.bytesRangeSizeMetric.Observe(1024)
 
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&bytes=0:1023")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&car-scope=file&depth=1&bytes=0:1023")
 
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
@@ -461,8 +463,8 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 }
 
 func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, error) {
-	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "0", "ranges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&depth=0")
+	api.metrics.carParamsMetric.With(prometheus.Labels{"carScope": "block", "ranges": "0"}).Inc()
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&car-scope=block&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, err
 	}
@@ -471,8 +473,8 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 }
 
 func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, io.ReadCloser, <-chan error, error) {
-	api.metrics.carParamsMetric.With(prometheus.Labels{"depth": "", "ranges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car")
+	api.metrics.carParamsMetric.With(prometheus.Labels{"carScope": "all", "ranges": "0"}).Inc()
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&car-scope=all&depth=all")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, nil, err
 	}
