@@ -44,10 +44,10 @@ The size of in-memory [2Q cache](https://pkg.go.dev/github.com/hashicorp/golang-
 Default: `false`
 
 When set to `true`, requests to backend will use
-`?format=car&depth=..&bytes=..` in addition to `?format=raw` to reduce the
+`?format=car&car-scope=..&bytes=..` in addition to `?format=raw` to reduce the
 number of round trips.
 
-This is an experimental feature that depends on `&depth=..&bytes=..`
+This is an experimental feature that depends on `&car-scope=..&bytes=..`
 parameters.  Currently only `https://l1s.strn.pl` supports it, but our
 intention is to standardize it and add it to the
 [trustless gateway spec](https://specs.ipfs.tech/http-gateways/trustless-gateway/)
