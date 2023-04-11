@@ -87,7 +87,7 @@ See [_Proxy Backend_ in `./docs/environment-variables.md`](./docs/environment-va
 
 ### How to run with Saturn CDN backend
 
-[Saturn](https://strn.network) is a CDN that provides a pool of [trustless gateways](https://specs.ipfs.tech/http-gateways/trustless-gateway/).
+[Saturn](https://saturn.tech) is a CDN that provides a pool of [trustless gateways](https://specs.ipfs.tech/http-gateways/trustless-gateway/).
 
 `bifrost-gateway` supports it via the [Caboose](https://github.com/filecoin-saturn/caboose) backend,
 which takes care of discovering and evaluating Block/CAR gateways (in Saturn called L1 nodes/peers) for increased availability.
@@ -137,7 +137,7 @@ graph LR
 Caveats:
 
 - IPFS Gateway interface based on reference implementation from [boxo/gateway](https://github.com/ipfs/boxo/tree/main/gateway#readme).
-- IPFS Backend based on https://strn.network and HTTP client talking to it  via [caboose](https://github.com/filecoin-saturn/caboose) with `STRN_LOGGER_SECRET`.
+- IPFS Backend based on https://saturn.tech and HTTP client talking to it  via [caboose](https://github.com/filecoin-saturn/caboose) with `STRN_LOGGER_SECRET`.
   - Learn more at [Project Rhea (decentralized IPFS gateway)](https://pl-strflt.notion.site/Project-Rhea-decentralized-IPFS-gateway-3d5906e7a0d84bea800d5920005dfea6)
 - Functional gaps facilitated by temporary delegation to legacy Kubo RPC (`/api/v0`) at `https://node[0-3].delegate.ipfs.io` infra (already used by js-ipfs).
 
