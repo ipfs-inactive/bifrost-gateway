@@ -7,13 +7,13 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/ipfs/bifrost-gateway/lib"
 	blockstore "github.com/ipfs/boxo/blockstore"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // Blockstore backed by a verifiable gateway. This is vendor-agnostic proxy interface,
@@ -37,18 +37,14 @@ type proxyBlockStore struct {
 }
 
 func (ps *proxyBlockStore) Fetch(ctx context.Context, path string, cb lib.DataCallback) error {
-	u, err := url.Parse(fmt.Sprintf("%s%s", ps.getRandomGatewayURL(), path))
+	urlStr := fmt.Sprintf("%s%s", ps.getRandomGatewayURL(), path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return err
 	}
-	goLog.Debugw("car fetch", "url", u)
-	resp, err := ps.httpClient.Do(&http.Request{
-		Method: http.MethodGet,
-		URL:    u,
-		Header: http.Header{
-			"Accept": []string{"application/vnd.ipld.car"},
-		},
-	})
+	goLog.Debugw("car fetch", "url", req.URL)
+	req.Header.Set("Accept", "application/vnd.ipld.car")
+	resp, err := ps.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -79,7 +75,7 @@ func newProxyBlockStore(gatewayURL []string, cdns *cachedDNS) blockstore.Blockst
 		gatewayURL: gatewayURL,
 		httpClient: &http.Client{
 			Timeout: GetBlockTimeout,
-			Transport: &customTransport{
+			Transport: otelhttp.NewTransport(&customTransport{
 				// Roundtripper with increased defaults than http.Transport such that retrieving
 				// multiple blocks from a single gateway concurrently is fast.
 				RoundTripper: &http.Transport{
@@ -89,7 +85,7 @@ func newProxyBlockStore(gatewayURL []string, cdns *cachedDNS) blockstore.Blockst
 					IdleConnTimeout:     90 * time.Second,
 					DialContext:         cdns.dialWithCachedDNS,
 				},
-			},
+			}),
 		},
 		// Enables block validation by default. Important since we are
 		// proxying block requests to an untrusted gateway.
@@ -99,18 +95,14 @@ func newProxyBlockStore(gatewayURL []string, cdns *cachedDNS) blockstore.Blockst
 }
 
 func (ps *proxyBlockStore) fetch(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	u, err := url.Parse(fmt.Sprintf("%s/ipfs/%s?format=raw", ps.getRandomGatewayURL(), c))
+	urlStr := fmt.Sprintf("%s/ipfs/%s?format=raw", ps.getRandomGatewayURL(), c)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return nil, err
 	}
-	goLog.Debugw("raw fetch", "url", u)
-	resp, err := ps.httpClient.Do(&http.Request{
-		Method: http.MethodGet,
-		URL:    u,
-		Header: http.Header{
-			"Accept": []string{"application/vnd.ipld.raw"},
-		},
-	})
+	goLog.Debugw("raw fetch", "url", req.URL)
+	req.Header.Set("Accept", "application/vnd.ipld.raw")
+	resp, err := ps.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

@@ -12,6 +12,7 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/ipfs/bifrost-gateway/lib"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/boxo/blockservice"
@@ -166,8 +167,11 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	handler = servertiming.Middleware(handler, nil)
 	handler = promhttp.InstrumentHandlerResponseSize(sum, handler)
 
-	// Add logging
+	// Add logging.
 	handler = withRequestLogger(handler)
+
+	// Add tracing.
+	handler = otelhttp.NewHandler(handler, "Gateway")
 
 	return &http.Server{
 		Handler: handler,

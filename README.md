@@ -141,6 +141,10 @@ Caveats:
   - Learn more at [Project Rhea (decentralized IPFS gateway)](https://pl-strflt.notion.site/Project-Rhea-decentralized-IPFS-gateway-3d5906e7a0d84bea800d5920005dfea6)
 - Functional gaps facilitated by temporary delegation to legacy Kubo RPC (`/api/v0`) at `https://node[0-3].delegate.ipfs.io` infra (already used by js-ipfs).
 
+### How to use tracing?
+
+For tracing configuration, please check: https://github.com/ipfs/boxo/blob/main/docs/tracing.md - this includes
+how to generate a `traceparent` header in order to be able to easily identify specific requests.
 
 ## Contributing
 
