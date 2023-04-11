@@ -96,10 +96,11 @@ type GraphGateway struct {
 }
 
 type GraphGatewayMetrics struct {
-	carFetchAttemptMetric      prometheus.Counter
-	carBlocksFetchedMetric     prometheus.Counter
-	blockRecoveryAttemptMetric prometheus.Counter
-	carParamsMetric            *prometheus.CounterVec
+	contextAlreadyCancelledMetric prometheus.Counter
+	carFetchAttemptMetric         prometheus.Counter
+	carBlocksFetchedMetric        prometheus.Counter
+	blockRecoveryAttemptMetric    prometheus.Counter
+	carParamsMetric               *prometheus.CounterVec
 
 	bytesRangeStartMetric prometheus.Histogram
 	bytesRangeSizeMetric  prometheus.Histogram
@@ -172,6 +173,14 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 	})
 	prometheus.MustRegister(carFetchAttemptMetric)
 
+	contextAlreadyCancelledMetric := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "ipfs",
+		Subsystem: "gw_graph_backend",
+		Name:      "car_fetch_context_already_cancelled",
+		Help:      "The number of times context is already cancelled when a CAR fetch was attempted by IPFSBackend.",
+	})
+	prometheus.MustRegister(contextAlreadyCancelledMetric)
+
 	// How many blocks were read via CARs?
 	// Need this as a baseline to reason about error ratio vs raw_block_recovery_attempts.
 	carBlocksFetchedMetric := prometheus.NewCounter(prometheus.CounterOpts{
@@ -223,6 +232,7 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 	prometheus.MustRegister(bytesRangeSizeMetric)
 
 	return &GraphGatewayMetrics{
+		contextAlreadyCancelledMetric,
 		carFetchAttemptMetric,
 		carBlocksFetchedMetric,
 		blockRecoveryAttemptMetric,
@@ -265,6 +275,11 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 			}
 		}()
 		metrics.carFetchAttemptMetric.Inc()
+
+		if ce := ctx.Err(); ce != nil && errors.Is(ce, context.Canceled) {
+			metrics.contextAlreadyCancelledMetric.Inc()
+		}
+
 		err := api.fetcher.Fetch(ctx, path, func(resource string, reader io.Reader) error {
 			cr, err := car.NewCarReader(reader)
 			if err != nil {
