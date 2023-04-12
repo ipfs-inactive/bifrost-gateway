@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/cskr/pubsub v1.0.2
-	github.com/filecoin-saturn/caboose v0.0.0-20230407094233-65275d010784
+	github.com/filecoin-saturn/caboose v0.0.0-20230412141153-0ef824e85bcf
 	github.com/gogo/protobuf v1.3.2
 	github.com/hashicorp/golang-lru/v2 v2.0.1
 	github.com/ipfs/boxo v0.8.1-0.20230411232920-5d6c73c8e35e
