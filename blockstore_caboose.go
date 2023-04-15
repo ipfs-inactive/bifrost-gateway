@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
-	"time"
+	"strings"
 
 	"github.com/filecoin-saturn/caboose"
 	blockstore "github.com/ipfs/boxo/blockstore"
@@ -61,14 +63,38 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		},
 	}
 
-	saturnTransport := http.Transport{
+	saturnTransport := http2.Transport{
 		// Increasing concurrency defaults from http.DefaultTransport
-		MaxIdleConns:        1000,
-		MaxConnsPerHost:     100,
-		MaxIdleConnsPerHost: 100,
-		IdleConnTimeout:     90 * time.Second,
+		/*
+			MaxIdleConns:        1000,
+			MaxConnsPerHost:     100,
+			MaxIdleConnsPerHost: 100,
+			IdleConnTimeout:     90 * time.Second,
+		*/
 
-		DialContext: cdns.dialWithCachedDNS,
+		DialTLSContext: func(ctx context.Context, network, addr string, cfg *tls.Config) (net.Conn, error) {
+			conn, err := cdns.dialWithCachedDNS(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+
+			colonPos := strings.LastIndex(addr, ":")
+			if colonPos == -1 {
+				colonPos = len(addr)
+			}
+			hostname := addr[:colonPos]
+
+			// Make a copy to avoid polluting argument or default.
+			c := cfg.Clone()
+			c.ServerName = hostname
+
+			tlsConn := tls.Client(conn, c)
+			if err := tlsConn.HandshakeContext(ctx); err != nil {
+				conn.Close()
+				return nil, err
+			}
+			return tlsConn, nil
+		},
 
 		// Saturn Weltschmerz
 		TLSClientConfig: &tls.Config{
@@ -84,13 +110,8 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		},
 	}
 
-	saturnWithH2, err := http2.ConfigureTransports(&saturnTransport)
-	if err != nil {
-		return nil, err
-	}
-
 	saturnRoundTripper := otelhttp.NewTransport(&customTransport{
-		RoundTripper: saturnWithH2,
+		RoundTripper: &saturnTransport,
 	})
 
 	saturnRetrievalClient := &http.Client{
