@@ -105,10 +105,13 @@ This is WIP, but the high level architecture is:
 ```mermaid
 graph LR
     A(((fa:fa-person HTTP</br>clients)))
-    B[bifrost-gateway]
-    N[[fa:fa-hive bifrost-infra:<br>HTTP load-balancers<br> nginx, TLS termination]]
-    S(((saturn.pl<br>CDN)))
+    B[[bifrost-gateway]]
+    N(((BGP Anycast,<br>HTTP load-balancers,<br>TLS termination)))
+    S(((Saturn<br>CDN)))
+    I[[IPNI]]
+    D(((DHT)))
 
+    P((( IPFS<br>Peers)))
 
     A -->| Accept: text/html, *| N
     A -->| Accept: application/vnd.ipld.raw | N
@@ -122,10 +125,14 @@ graph LR
     A -->| DNSLink Host: en.wikipedia-on-ipfs.org | N
     A -->| Subdomain Host: cid.ipfs.dweb.link | N
 
-    N --> B
+    N ==>| fa:fa-link HTTP GET <br> Content Path | B
     
-    B --->|fa:fa-cube HTTP GET Block x N | S
-    B ..->|fa:fa-cubes TBD HTTP GET CAR x N | S
+    B ==>|fa:fa-cube HTTP GET <br> Blocks | S
+    S -.- I 
+    I -.- D 
+    D -.- P -.- I
+  
+    P ===|fa:fa-cube the best block/dag <br> transfer protocol | S
 ```
 
 `bifrost-gateway` nodes are responsible for processing requests to:
