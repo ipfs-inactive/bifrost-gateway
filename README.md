@@ -100,8 +100,40 @@ See [`GOLOG_LOG_LEVEL`](./docs/environment-variables.md#golog_log_level).
 
 ### How does this work at ipfs.io and dweb.link
 
-This is WIP, but the high level architecture is:
+This is WIP, but the high level architecture is to move from
 
+**Old Kubo-based architecture:**
+
+```mermaid
+graph LR
+    A(((fa:fa-person HTTP</br>clients)))
+    K[[Kubo]]
+    N(((BGP Anycast,<br>HTTP load-balancers,<br>TLS termination)))
+
+    D(((DHT)))
+
+    P((( IPFS<br>Peers)))
+
+    A -->| Accept: text/html, *| N
+    A -->| Accept: application/vnd.ipld.raw | N
+    A -->| Accept: application/vnd.ipld.car | N
+    A -->| Accept: application/vnd.ipld.dag-json | N
+    A -->| Accept: application/vnd.ipld.dag-cbor | N
+    A -->| Accept: application/json | N
+    A -->| Accept: application/cbor | N
+    A -->| Accept: application/x-tar | N
+    A -->| Accept: application/vnd.ipfs.ipns-record | N
+    A -->| DNSLink Host: en.wikipedia-on-ipfs.org | N
+    A -->| Subdomain Host: cid.ipfs.dweb.link | N
+
+    N ==>| fa:fa-link HTTP GET <br> Content Path | K
+
+    K -.- D
+    K ===|fa:fa-cube bitswapl | P
+    P -.- D
+```
+
+**New Rhea architecture:**
 ```mermaid
 graph LR
     A(((fa:fa-person HTTP</br>clients)))
