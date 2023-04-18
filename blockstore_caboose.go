@@ -84,6 +84,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 					InsecureSkipVerify: true,
 					// ServerName:         "strn.pl",
 				},
+				ForceAttemptHTTP2: true,
 			},
 		}),
 	}
