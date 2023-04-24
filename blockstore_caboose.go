@@ -45,7 +45,8 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		Timeout: caboose.DefaultSaturnOrchestratorRequestTimeout,
 		Transport: &customTransport{
 			RoundTripper: &http.Transport{
-				DialContext: cdns.dialWithCachedDNS,
+				DialContext:       cdns.dialWithCachedDNS,
+				ForceAttemptHTTP2: true,
 			},
 		},
 	}
@@ -55,7 +56,8 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		Transport: &customTransport{
 			AuthorizationBearerToken: os.Getenv(EnvSaturnLoggerSecret),
 			RoundTripper: &http.Transport{
-				DialContext: cdns.dialWithCachedDNS,
+				DialContext:       cdns.dialWithCachedDNS,
+				ForceAttemptHTTP2: true,
 			},
 		},
 	}

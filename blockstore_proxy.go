@@ -84,6 +84,7 @@ func newProxyBlockStore(gatewayURL []string, cdns *cachedDNS) blockstore.Blockst
 					MaxIdleConnsPerHost: 100,
 					IdleConnTimeout:     90 * time.Second,
 					DialContext:         cdns.dialWithCachedDNS,
+					ForceAttemptHTTP2:   true,
 				},
 			}),
 		},

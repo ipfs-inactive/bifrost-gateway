@@ -44,6 +44,7 @@ func newProxyRouting(kuboRPC []string, cdns *cachedDNS) routing.ValueStore {
 					MaxIdleConnsPerHost: 100,
 					IdleConnTimeout:     90 * time.Second,
 					DialContext:         cdns.dialWithCachedDNS,
+					ForceAttemptHTTP2:   true,
 				},
 			}),
 		},
