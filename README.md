@@ -57,11 +57,14 @@ Official Docker images are provided at [hub.docker.com/r/ipfs/bifrost-gateway](h
 
 - Releases
   - `latest` and `release` always point at the latest release
-  - `vN.N.N` point at a specific [release tag](https://github.com/ipfs/bifrost-gateway/releases) 
+  - `vN.N.N` point at a specific [release tag](https://github.com/ipfs/bifrost-gateway/releases)
 - Developer builds
   - `main-latest` always points at the `HEAD` of the `main` branch
-  - `main-YYYY-DD-MM-GITSHA` points at a specific commit from the `main` branch 
-
+  - `main-YYYY-DD-MM-GITSHA` points at a specific commit from the `main` branch
+- Experimental, unstable builds
+  - `staging-latest` always points at the `HEAD` of the `staging` branch
+  - `staging-YYYY-DD-MM-GITSHA` points at a specific commit from the `main` branch
+  - This tag is used by developers for internal testing, not intended for end users
 
 When using Docker, make sure to pass necessary config via `-e`:
 ```console
