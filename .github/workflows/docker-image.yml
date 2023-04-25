@@ -38,7 +38,7 @@ jobs:
         if: github.event_name == 'workflow_run'
         uses: protocol/.github/.github/actions/inspect-releaser@master
         with:
-          artifacts-url: github.event.workflow_run.artifacts_url
+          artifacts-url: ${{ github.event.workflow_run.artifacts_url }}
   push_to_registry:
     needs: [prepare_checkout]
     if: needs.prepare_checkout.outputs.ref != ''
