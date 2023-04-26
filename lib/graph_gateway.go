@@ -83,7 +83,9 @@ type Notifier interface {
 	NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error
 }
 
-type notifiersForCid struct {
+// notifiersForRootCid is used for reducing lock contention by only notifying
+// exchanges related to the same content root CID
+type notifiersForRootCid struct {
 	lk        sync.RWMutex
 	deleted   int8
 	notifiers []Notifier
@@ -96,7 +98,7 @@ type GraphGateway struct {
 	namesys      namesys.NameSystem
 	bstore       blockstore.Blockstore
 
-	notifiers sync.Map // cid -> notifiersForCid
+	notifiers sync.Map // cid -> notifiersForRootCid
 	metrics   *GraphGatewayMetrics
 }
 
@@ -281,10 +283,10 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 	}
 
 	notifierKey := api.getRootOfPath(path)
-	var notifier *notifiersForCid
+	var notifier *notifiersForRootCid
 	for {
-		notifiers, _ := api.notifiers.LoadOrStore(notifierKey, &notifiersForCid{notifiers: []Notifier{}})
-		if n, ok := notifiers.(*notifiersForCid); ok {
+		notifiers, _ := api.notifiers.LoadOrStore(notifierKey, &notifiersForRootCid{notifiers: []Notifier{}})
+		if n, ok := notifiers.(*notifiersForRootCid); ok {
 			n.lk.Lock()
 			// could have been deleted after our load. try again.
 			if n.deleted != 0 {
@@ -367,16 +369,16 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 
 func (api *GraphGateway) notifyOngoingRequests(ctx context.Context, key string, blks ...blocks.Block) {
 	if notifiers, ok := api.notifiers.Load(key); ok {
-		notifier, ok := notifiers.(*notifiersForCid)
+		notifier, ok := notifiers.(*notifiersForRootCid)
 		if !ok {
-			graphLog.Errorw("notifyOngoingRequests failed", "error", "could not get notifier")
+			graphLog.Errorw("notifyOngoingRequests failed", "key", key, "error", "could not get notifiersForRootCid")
 			return
 		}
 		notifier.lk.RLock()
 		for _, n := range notifier.notifiers {
 			err := n.NotifyNewBlocks(ctx, blks...)
 			if err != nil {
-				graphLog.Errorw("notifyAllOngoingRequests failed", "error", err)
+				graphLog.Errorw("notifyOngoingRequests failed", "key", key, "error", err)
 			}
 		}
 		notifier.lk.RUnlock()
