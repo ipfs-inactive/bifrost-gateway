@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	github.com/cskr/pubsub v1.0.2
-	github.com/filecoin-saturn/caboose v0.0.0-20230418112344-17ecb1db5490
+	github.com/filecoin-saturn/caboose v0.0.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/hashicorp/golang-lru/v2 v2.0.1
 	github.com/ipfs/boxo v0.8.1-0.20230411232920-5d6c73c8e35e
@@ -37,6 +37,7 @@ require (
 
 require (
 	github.com/alecthomas/units v0.0.0-20210927113745-59d0afb8317a // indirect
+	github.com/asecurityteam/rolling v0.0.0-20230418204413-b4052899307d // indirect
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
@@ -71,7 +72,6 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/huin/goupnp v1.0.3 // indirect
 	github.com/inconshreveable/mousetrap v1.0.1 // indirect
-	github.com/influxdata/tdigest v0.0.1 // indirect
 	github.com/ipfs/bbloom v0.0.4 // indirect
 	github.com/ipfs/go-bitfield v1.1.0 // indirect
 	github.com/ipfs/go-datastore v0.6.0 // indirect
