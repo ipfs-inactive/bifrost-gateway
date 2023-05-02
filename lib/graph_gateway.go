@@ -4,15 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ipfs/boxo/exchange/offline"
-	"github.com/ipfs/boxo/fetcher"
-	fetcherhelpers "github.com/ipfs/boxo/fetcher/helpers"
-	bsfetcher "github.com/ipfs/boxo/fetcher/impl/blockservice"
-	dagpb "github.com/ipld/go-codec-dagpb"
-	"github.com/ipld/go-ipld-prime"
-	"github.com/ipld/go-ipld-prime/node/basicnode"
-	"github.com/ipld/go-ipld-prime/schema"
-	"github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	"io"
 	"net/http"
 	"runtime"
@@ -26,6 +17,10 @@ import (
 	nsopts "github.com/ipfs/boxo/coreiface/options/namesys"
 	ifacepath "github.com/ipfs/boxo/coreiface/path"
 	exchange "github.com/ipfs/boxo/exchange"
+	"github.com/ipfs/boxo/exchange/offline"
+	"github.com/ipfs/boxo/fetcher"
+	fetcherhelpers "github.com/ipfs/boxo/fetcher/helpers"
+	bsfetcher "github.com/ipfs/boxo/fetcher/impl/blockservice"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/gateway"
 	"github.com/ipfs/boxo/ipld/car"
@@ -37,7 +32,12 @@ import (
 	format "github.com/ipfs/go-ipld-format"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-unixfsnode"
+	dagpb "github.com/ipld/go-codec-dagpb"
+	"github.com/ipld/go-ipld-prime"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/ipld/go-ipld-prime/node/basicnode"
+	"github.com/ipld/go-ipld-prime/schema"
+	"github.com/ipld/go-ipld-prime/traversal/selector/builder"
 	routinghelpers "github.com/libp2p/go-libp2p-routing-helpers"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
@@ -316,7 +316,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 		metrics:          api.metrics,
 	}
 
-	notifierKey := api.getRootOfPath(path)
+	notifierKey := api.getRootOfPath(p.String())
 	var notifier *notifiersForRootCid
 	for {
 		notifiers, _ := api.notifiers.LoadOrStore(notifierKey, &notifiersForRootCid{notifiers: []Notifier{}})
@@ -572,7 +572,7 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"carScope": "block", "ranges": "0"}).Inc()
 	// TODO: if path is `/ipfs/cid`, we should use ?format=raw
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path, map[string]string{"depth": "0", "car-scope" : "block"})
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path, map[string]string{"depth": "0", "car-scope": "block"})
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -594,7 +594,7 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 	api.metrics.bytesRangeStartMetric.Observe(0)
 	api.metrics.bytesRangeSizeMetric.Observe(1024)
 
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path, map[string]string{"bytes": "0-1023", "car-scope" : "file", "depth" : "1"})
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path, map[string]string{"bytes": "0-1023", "car-scope": "file", "depth": "1"})
 
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
@@ -612,7 +612,7 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 
 func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"carScope": "block", "ranges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path, map[string]string{"depth": "0", "car-scope" : "block"})
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path, map[string]string{"depth": "0", "car-scope": "block"})
 	if err != nil {
 		return gateway.ContentPathMetadata{}, err
 	}
@@ -622,7 +622,7 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 
 func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, io.ReadCloser, <-chan error, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"carScope": "all", "ranges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path, map[string]string{"depth": "all", "car-scope" : "all"})
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path, map[string]string{"depth": "all", "car-scope": "all"})
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, nil, err
 	}
