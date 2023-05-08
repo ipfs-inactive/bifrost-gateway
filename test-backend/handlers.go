@@ -10,16 +10,16 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ipfs/boxo/fetcher"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/gateway"
-	"github.com/ipfs/boxo/ipld/car"
-	"github.com/ipfs/boxo/ipld/car/util"
+	car2 "github.com/ipfs/boxo/ipld/car/v2"
+	"github.com/ipfs/boxo/ipld/car/v2/storage"
 	"github.com/ipfs/boxo/ipld/merkledag"
 	unixfile "github.com/ipfs/boxo/ipld/unixfs/file"
+	uio "github.com/ipfs/boxo/ipld/unixfs/io"
 	"github.com/ipfs/boxo/path"
 	"github.com/ipfs/boxo/path/resolver"
 	blocks "github.com/ipfs/go-block-format"
@@ -185,10 +185,10 @@ func simpleSelectorToCar(ctx context.Context, bsrv blockservice.BlockService, p 
 	r, w := io.Pipe()
 
 	rangeStr, hasRange := params.Get("bytes"), params.Has("bytes")
-	depthStr, hasDepth := params.Get("depth"), params.Has("depth")
+	scopeStr, hasScope := params.Get("car-scope"), params.Has("car-scope")
 
-	if hasDepth && !(depthStr == "0" || depthStr == "1" || depthStr == "all") {
-		return nil, fmt.Errorf("depth type: %s not supported", depthStr)
+	if hasScope && !(scopeStr == "block" || scopeStr == "file" || scopeStr == "all") {
+		return nil, fmt.Errorf("scope type: %s not supported", scopeStr)
 	}
 	var getRange *gateway.ByteRange
 	if hasRange {
@@ -201,20 +201,15 @@ func simpleSelectorToCar(ctx context.Context, bsrv blockservice.BlockService, p 
 	go func() {
 		defer w.Close()
 
-		// Setup header for the output car
-		err = car.WriteHeader(&car.CarHeader{
-			Roots:   []cid.Cid{rootCid},
-			Version: 1,
-		}, w)
-		if err != nil {
-			goLog.Error(fmt.Errorf("writing car header: %w", err))
-		}
-
 		blockGetter := merkledag.NewDAGService(bsrv).Session(ctx)
+		cw, err := storage.NewWritable(w, []cid.Cid{rootCid}, car2.WriteAsCarV1(true))
+		if err != nil {
+			goLog.Error(fmt.Errorf("writing creating car writer: %w", err))
+			return
+		}
 		blockGetter = &nodeGetterToCarExporer{
-			ng:    blockGetter,
-			w:     w,
-			mhSet: make(map[string]struct{}),
+			ng: blockGetter,
+			cw: cw,
 		}
 		dsrv := merkledag.NewReadOnlyDagService(blockGetter)
 
@@ -228,7 +223,7 @@ func simpleSelectorToCar(ctx context.Context, bsrv blockservice.BlockService, p 
 			return
 		}
 
-		if hasDepth && depthStr == "0" {
+		if hasScope && scopeStr == "block" {
 			return
 		}
 
@@ -243,7 +238,7 @@ func simpleSelectorToCar(ctx context.Context, bsrv blockservice.BlockService, p 
 			// It's not UnixFS
 
 			// If it's all fetch the graph recursively
-			if depthStr == "all" {
+			if scopeStr == "all" {
 				if err := merkledag.FetchGraph(ctx, lastCid, dsrv); err != nil {
 					goLog.Error(err)
 				}
@@ -286,13 +281,21 @@ func simpleSelectorToCar(ctx context.Context, bsrv blockservice.BlockService, p 
 			_, _ = io.CopyN(io.Discard, f, numToRead)
 			return
 		} else if d, ok := ufsNode.(files.Directory); ok {
-			if depthStr == "1" {
-				iter := d.Entries()
-				for iter.Next() {
+			if scopeStr == "file" {
+				dir, err := uio.NewDirectoryFromNode(dsrv, lastCidNode)
+				if err != nil {
+					goLog.Error(fmt.Errorf("could not load directory %w", err))
+					return
+				}
+				links := dir.EnumLinksAsync(ctx)
+				for l := range links {
+					if l.Err == nil {
+						fmt.Println(l.Link.Name)
+					}
 				}
 				return
 			}
-			if depthStr == "all" {
+			if scopeStr == "all" {
 				// TODO: being lazy here
 				w, err := files.NewTarWriter(io.Discard)
 				if err != nil {
@@ -314,10 +317,7 @@ func simpleSelectorToCar(ctx context.Context, bsrv blockservice.BlockService, p 
 
 type nodeGetterToCarExporer struct {
 	ng format.NodeGetter
-	w  io.Writer
-
-	lk    sync.RWMutex
-	mhSet map[string]struct{}
+	cw storage.WritableCar
 }
 
 func (n *nodeGetterToCarExporer) Get(ctx context.Context, c cid.Cid) (format.Node, error) {
@@ -326,7 +326,7 @@ func (n *nodeGetterToCarExporer) Get(ctx context.Context, c cid.Cid) (format.Nod
 		return nil, err
 	}
 
-	if err := n.trySendBlock(nd); err != nil {
+	if err := n.trySendBlock(ctx, nd); err != nil {
 		return nil, err
 	}
 
@@ -340,7 +340,7 @@ func (n *nodeGetterToCarExporer) GetMany(ctx context.Context, cids []cid.Cid) <-
 		defer close(outCh)
 		for nd := range ndCh {
 			if nd.Err == nil {
-				if err := n.trySendBlock(nd.Node); err != nil {
+				if err := n.trySendBlock(ctx, nd.Node); err != nil {
 					select {
 					case outCh <- &format.NodeOption{Err: err}:
 					case <-ctx.Done():
@@ -357,28 +357,8 @@ func (n *nodeGetterToCarExporer) GetMany(ctx context.Context, cids []cid.Cid) <-
 	return outCh
 }
 
-func (n *nodeGetterToCarExporer) trySendBlock(block blocks.Block) error {
-	h := string(block.Cid().Hash())
-	n.lk.RLock()
-	_, found := n.mhSet[h]
-	n.lk.RUnlock()
-	if !found {
-		doSend := false
-		n.lk.Lock()
-		_, found := n.mhSet[h]
-		if !found {
-			doSend = true
-			n.mhSet[h] = struct{}{}
-		}
-		n.lk.Unlock()
-		if doSend {
-			err := util.LdWrite(n.w, block.Cid().Bytes(), block.RawData()) // write to the output car
-			if err != nil {
-				return fmt.Errorf("writing to output car: %w", err)
-			}
-		}
-	}
-	return nil
+func (n *nodeGetterToCarExporer) trySendBlock(ctx context.Context, block blocks.Block) error {
+	return n.cw.Put(ctx, block.Cid().KeyString(), block.RawData())
 }
 
 var _ format.NodeGetter = (*nodeGetterToCarExporer)(nil)
