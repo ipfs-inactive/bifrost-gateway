@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/boxo/blockservice"
@@ -315,14 +316,46 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 			metrics.contextAlreadyCancelledMetric.Inc()
 		}
 
-		err := api.fetcher.Fetch(ctx, path, func(resource string, reader io.Reader) error {
+		cctx, cncl := context.WithCancel(ctx)
+		defer cncl()
+		err := api.fetcher.Fetch(cctx, path, func(resource string, reader io.Reader) error {
 			cr, err := car.NewCarReader(reader)
 			if err != nil {
 				return err
 			}
+
+			blkCh := make(chan blocks.Block, 1)
+			go func() {
+				defer close(blkCh)
+				for {
+					blk, rdErr := cr.Next()
+					if rdErr != nil {
+						err = rdErr
+					}
+					blkCh <- blk
+				}
+			}()
+
+			t := time.NewTimer(30 * time.Second)
+			defer func() {
+				if !t.Stop() {
+					<-t.C
+				}
+			}()
 			for {
-				blk, err := cr.Next()
-				if err != nil {
+				var blk blocks.Block
+				var ok bool
+				select {
+				case blk, ok = <-blkCh:
+					if !t.Stop() {
+						<-t.C
+
+					}
+					t.Reset(30 * time.Second)
+				case <-t.C:
+					return io.ErrNoProgress
+				}
+				if !ok {
 					if errors.Is(err, io.EOF) {
 						return nil
 					}
