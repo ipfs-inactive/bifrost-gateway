@@ -39,6 +39,8 @@ import (
 
 var graphLog = golog.Logger("backend/graph")
 
+const GetBlockTimeout = time.Second * 60
+
 // type DataCallback = func(resource string, reader io.Reader) error
 // TODO: Don't use a caboose type, perhaps ask them to use a type alias instead of a type
 type DataCallback = caboose.DataCallback
@@ -336,7 +338,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 				}
 			}()
 
-			t := time.NewTimer(30 * time.Second)
+			t := time.NewTimer(GetBlockTimeout)
 			defer func() {
 				if !t.Stop() {
 					<-t.C
@@ -351,7 +353,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 						<-t.C
 
 					}
-					t.Reset(30 * time.Second)
+					t.Reset(GetBlockTimeout)
 				case <-t.C:
 					return io.ErrNoProgress
 				}
