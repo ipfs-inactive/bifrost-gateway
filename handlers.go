@@ -155,7 +155,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 		Name:       "response_size_bytes",
 		Help:       "The HTTP response sizes in bytes.",
 		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001},
-	}, nil)
+	}, []string{"code"})
 	err = prometheus.Register(sum)
 	if err != nil {
 		return nil, err
