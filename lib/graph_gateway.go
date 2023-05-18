@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/boxo/blockservice"
@@ -109,8 +110,9 @@ type GraphGateway struct {
 	namesys      namesys.NameSystem
 	bstore       blockstore.Blockstore
 
-	notifiers sync.Map // cid -> notifiersForRootCid
-	metrics   *GraphGatewayMetrics
+	notifiers        sync.Map // cid -> notifiersForRootCid
+	metrics          *GraphGatewayMetrics
+	blockReadTimeout time.Duration
 }
 
 type GraphGatewayMetrics struct {
@@ -165,13 +167,14 @@ func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ..
 	}
 
 	return &GraphGateway{
-		fetcher:      f,
-		blockFetcher: blockFetcher,
-		routing:      vs,
-		namesys:      ns,
-		bstore:       bs,
-		notifiers:    sync.Map{},
-		metrics:      registerGraphGatewayMetrics(),
+		fetcher:          f,
+		blockFetcher:     blockFetcher,
+		routing:          vs,
+		namesys:          ns,
+		bstore:           bs,
+		notifiers:        sync.Map{},
+		metrics:          registerGraphGatewayMetrics(),
+		blockReadTimeout: time.Second * 60,
 	}, nil
 }
 
@@ -287,8 +290,11 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 	// Do we want to deal parameters as well since they might mean walking a lot of data twice? Alternatively, this could wait until we can rework the GraphGateway logic to not rely on the BlocksGateway traversal.
 	remainingPathToGet, err := api.tryLoadPathFromBlockstore(ctx, p)
 	if err != nil {
+		graphLog.Errorf("error loading path from blockstore: %s", err.Error())
 		return nil, nil, err
 	}
+	graphLog.Debugf("asked for path %s, remaining path %s", p, remainingPathToGet)
+
 	remPath := ifacepath.New(remainingPathToGet)
 	if err := remPath.IsValid(); err != nil {
 		return nil, nil, err
@@ -349,7 +355,41 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 			metrics.contextAlreadyCancelledMetric.Inc()
 		}
 
-		err := api.fetcher.Fetch(ctx, carRequestPath, func(resource string, reader io.Reader) error {
+		carFetchCtx, carFetchCancel := context.WithCancel(ctx)
+
+		newBlockReceivedCh := make(chan struct{}, 1)
+		lkCarReadTimeOutErr := sync.Mutex{}
+		var carReadTimeoutErr error
+		go func() {
+			firstBlockTimeout := time.Second * 30
+			t := time.NewTimer(firstBlockTimeout)
+			nBlocksReceived := 0
+			for {
+				select {
+				case _, more := <-newBlockReceivedCh:
+					if !more {
+						return
+					}
+					if !t.Stop() {
+						<-t.C
+					}
+					nBlocksReceived++
+					t.Reset(api.blockReadTimeout)
+				case <-t.C:
+					lkCarReadTimeOutErr.Lock()
+					if nBlocksReceived == 0 {
+						carReadTimeoutErr = fmt.Errorf("fetch of CAR timed out before receiving the first block")
+					} else {
+						carReadTimeoutErr = fmt.Errorf("fetch of CAR timed out due to a stall between reads. %d blocks read", nBlocksReceived)
+					}
+					lkCarReadTimeOutErr.Unlock()
+					carFetchCancel()
+					return
+				}
+			}
+		}()
+
+		err := api.fetcher.Fetch(carFetchCtx, carRequestPath, func(resource string, reader io.Reader) error {
 			cr, err := car.NewCarReader(reader)
 			if err != nil {
 				return err
@@ -362,14 +402,21 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 					}
 					return err
 				}
-				if err := bstore.Put(ctx, blk); err != nil {
+				if err := bstore.Put(carFetchCtx, blk); err != nil {
 					return err
 				}
 				metrics.carBlocksFetchedMetric.Inc()
-				api.notifyOngoingRequests(ctx, notifierKey, blk)
+				api.notifyOngoingRequests(carFetchCtx, notifierKey, blk)
+				select {
+				case newBlockReceivedCh <- struct{}{}:
+				case <-carFetchCtx.Done():
+					return carFetchCtx.Err()
+				}
 			}
 		})
-		if err != nil {
+		if carReadTimeoutErr != nil {
+			graphLog.Debugw("car Fetch failed", "path", carRequestPath, "error", carReadTimeoutErr)
+		} else if err != nil {
 			graphLog.Debugw("car Fetch failed", "path", carRequestPath, "error", err)
 		}
 		if err := carFetchingExch.Close(); err != nil {
