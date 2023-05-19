@@ -67,9 +67,9 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		Transport: otelhttp.NewTransport(&customTransport{
 			RoundTripper: &http.Transport{
 				// Increasing concurrency defaults from http.DefaultTransport
-				MaxIdleConns:        1000,
-				MaxConnsPerHost:     100,
-				MaxIdleConnsPerHost: 100,
+				MaxIdleConns:        500000,
+				MaxConnsPerHost:     20000,
+				MaxIdleConnsPerHost: 20000,
 				IdleConnTimeout:     90 * time.Second,
 
 				DialContext: cdns.dialWithCachedDNS,
@@ -86,7 +86,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 					InsecureSkipVerify: true,
 					// ServerName:         "strn.pl",
 				},
-				ForceAttemptHTTP2: true,
+				ForceAttemptHTTP2: false,
 			},
 		}),
 	}
