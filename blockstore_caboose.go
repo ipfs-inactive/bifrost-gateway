@@ -67,9 +67,9 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		Transport: otelhttp.NewTransport(&customTransport{
 			RoundTripper: &http.Transport{
 				// Increasing concurrency defaults from http.DefaultTransport
-				MaxIdleConns:        200000,
-				MaxConnsPerHost:     20000,
-				MaxIdleConnsPerHost: 20000,
+				MaxIdleConns:        100,
+				MaxConnsPerHost:     100,
+				MaxIdleConnsPerHost: 100,
 				IdleConnTimeout:     90 * time.Second,
 
 				DialContext: cdns.dialWithCachedDNS,
