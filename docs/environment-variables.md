@@ -43,14 +43,16 @@ The size of in-memory [2Q cache](https://pkg.go.dev/github.com/hashicorp/golang-
 
 Default: `false`
 
-When set to `true`, requests to backend will use
-`?format=car&car-scope=..&bytes=..` in addition to `?format=raw` to reduce the
-number of round trips.
+When set to `true`, requests to backend will use `?format=car` in addition to
+`?format=raw` to reduce the number of round trips.
 
-This is an experimental feature that depends on `&car-scope=..&bytes=..`
-parameters.  Currently only `https://l1s.strn.pl` supports it, but our
-intention is to standardize it and add it to the
-[trustless gateway spec](https://specs.ipfs.tech/http-gateways/trustless-gateway/)
+This is an experimental feature that depends on pathing, `dag-scope` and `entity-bytes`
+parameters from [IPIP-402](https://github.com/ipfs/specs/pull/402).
+
+Currently only `https://l1s.strn.pl` supports it, but our intention is to
+standardize it ([IPIP-402](https://github.com/ipfs/specs/pull/402)) and add it
+to the [trustless gateway spec](https://specs.ipfs.tech/http-gateways/trustless-gateway/)
+and [boxo/gateway](https://github.com/ipfs/boxo/pull/303) reference library
 in the near feature.
 
 ## Proxy Backend

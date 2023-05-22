@@ -7,7 +7,7 @@ require (
 	github.com/filecoin-saturn/caboose v0.0.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/hashicorp/golang-lru/v2 v2.0.1
-	github.com/ipfs/boxo v0.8.1-0.20230411232920-5d6c73c8e35e
+	github.com/ipfs/boxo v0.8.2-0.20230517082811-ff20a4df22cd
 	github.com/ipfs/go-block-format v0.1.2
 	github.com/ipfs/go-cid v0.4.0
 	github.com/ipfs/go-ipld-format v0.4.0
@@ -41,7 +41,6 @@ require (
 	github.com/benbjohnson/clock v1.3.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.0 // indirect
-	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/containerd/cgroups v1.0.4 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
