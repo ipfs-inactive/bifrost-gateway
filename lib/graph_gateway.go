@@ -338,12 +338,8 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 				}
 			}()
 
-			t := time.NewTimer(GetBlockTimeout)
-			defer func() {
-				if !t.Stop() {
-					<-t.C
-				}
-			}()
+			// initially set a higher timeout here so that if there's an initial timeout error we get it from the car reader.
+			t := time.NewTimer(GetBlockTimeout * 2)
 			for {
 				var blk blocks.Block
 				var ok bool
