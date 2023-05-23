@@ -326,6 +326,8 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 				return err
 			}
 
+			cbCtx, cncl := context.WithCancel(cctx)
+			defer cncl()
 			blkCh := make(chan blocks.Block, 1)
 			go func() {
 				defer close(blkCh)
@@ -334,7 +336,10 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 					if rdErr != nil {
 						err = rdErr
 					}
-					blkCh <- blk
+					select {
+					case blkCh <- blk:
+					case <-cbCtx.Done():
+					}
 				}
 			}()
 
@@ -351,7 +356,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 					}
 					t.Reset(GetBlockTimeout)
 				case <-t.C:
-					return io.ErrNoProgress
+					return gateway.ErrGatewayTimeout
 				}
 				if !ok {
 					if errors.Is(err, io.EOF) {
