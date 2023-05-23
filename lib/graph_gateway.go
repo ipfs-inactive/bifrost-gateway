@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/boxo/blockservice"
@@ -37,6 +38,8 @@ import (
 )
 
 var graphLog = golog.Logger("backend/graph")
+
+const GetBlockTimeout = time.Second * 60
 
 // type DataCallback = func(resource string, reader io.Reader) error
 // TODO: Don't use a caboose type, perhaps ask them to use a type alias instead of a type
@@ -315,14 +318,47 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 			metrics.contextAlreadyCancelledMetric.Inc()
 		}
 
-		err := api.fetcher.Fetch(ctx, path, func(resource string, reader io.Reader) error {
+		cctx, cncl := context.WithCancel(ctx)
+		defer cncl()
+		err := api.fetcher.Fetch(cctx, path, func(resource string, reader io.Reader) error {
 			cr, err := car.NewCarReader(reader)
 			if err != nil {
 				return err
 			}
+
+			cbCtx, cncl := context.WithCancel(cctx)
+			defer cncl()
+			blkCh := make(chan blocks.Block, 1)
+			go func() {
+				defer close(blkCh)
+				for {
+					blk, rdErr := cr.Next()
+					if rdErr != nil {
+						err = rdErr
+					}
+					select {
+					case blkCh <- blk:
+					case <-cbCtx.Done():
+					}
+				}
+			}()
+
+			// initially set a higher timeout here so that if there's an initial timeout error we get it from the car reader.
+			t := time.NewTimer(GetBlockTimeout * 2)
 			for {
-				blk, err := cr.Next()
-				if err != nil {
+				var blk blocks.Block
+				var ok bool
+				select {
+				case blk, ok = <-blkCh:
+					if !t.Stop() {
+						<-t.C
+
+					}
+					t.Reset(GetBlockTimeout)
+				case <-t.C:
+					return gateway.ErrGatewayTimeout
+				}
+				if !ok {
 					if errors.Is(err, io.EOF) {
 						return nil
 					}
