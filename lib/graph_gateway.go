@@ -340,6 +340,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 					select {
 					case blkCh <- blk:
 					case <-cbCtx.Done():
+						return
 					}
 				}
 			}()
