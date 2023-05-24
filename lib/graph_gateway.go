@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -309,7 +310,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 		defer func() {
 			if r := recover(); r != nil {
 				// TODO: move to Debugw?
-				graphLog.Errorw("Recovered fetcher error", "path", path, "error", r)
+				graphLog.Errorw("Recovered fetcher error", "path", path, "error", r, "stacktrace", string(debug.Stack()))
 			}
 		}()
 		metrics.carFetchAttemptMetric.Inc()
