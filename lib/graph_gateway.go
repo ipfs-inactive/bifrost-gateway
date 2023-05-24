@@ -373,7 +373,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 			}
 		})
 		if err != nil {
-			graphLog.Debugw("car Fetch failed", "path", path, "error", err)
+			graphLog.Infow("car Fetch failed", "path", path, "error", err)
 		}
 		if err := carFetchingExch.Close(); err != nil {
 			graphLog.Errorw("carFetchingExch.Close()", "error", err)
