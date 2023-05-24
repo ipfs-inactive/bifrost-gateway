@@ -352,23 +352,24 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 				case blk, ok = <-blkCh:
 					if !t.Stop() {
 						<-t.C
-
 					}
 					t.Reset(GetBlockTimeout)
 				case <-t.C:
 					return gateway.ErrGatewayTimeout
 				}
-				if !ok {
+				if !ok || err != nil {
 					if errors.Is(err, io.EOF) {
 						return nil
 					}
 					return err
 				}
-				if err := bstore.Put(ctx, blk); err != nil {
-					return err
+				if blk != nil {
+					if err := bstore.Put(ctx, blk); err != nil {
+						return err
+					}
+					metrics.carBlocksFetchedMetric.Inc()
+					api.notifyOngoingRequests(ctx, notifierKey, blk)
 				}
-				metrics.carBlocksFetchedMetric.Inc()
-				api.notifyOngoingRequests(ctx, notifierKey, blk)
 			}
 		})
 		if err != nil {
