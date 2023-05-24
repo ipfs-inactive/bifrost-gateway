@@ -370,6 +370,8 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 					}
 					metrics.carBlocksFetchedMetric.Inc()
 					api.notifyOngoingRequests(ctx, notifierKey, blk)
+				} else {
+					graphLog.Errorw("got nil block from car reader", "path", path, "ok", ok, "err", err)
 				}
 			}
 		})
