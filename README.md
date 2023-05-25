@@ -1,7 +1,7 @@
 bifrost-gateway
 =======================
 
-> A lightweight IPFS Gateway daemon backed by a remote data store. 
+> A lightweight IPFS Gateway daemon backed by a remote data store.
 
 - [About](#about)
 - [Usage](#usage)
@@ -9,9 +9,10 @@ bifrost-gateway
   - [Configuration](#configuration)
   - [Docker](#docker)
 - [FAQ](#faq)
-  - [How to run with local gateway](#how-to-run-with-local-gateway)
+  - [How to run with local gateway as a backend](#how-to-run-with-local-gateway-as-a-backend)
   - [How to run with Saturn CDN backend](#how-to-run-with-saturn-cdn-backend)
   - [How to debug](#how-to-debug)
+  - [How to use tracing](#how-to-use-tracing)
   - [How does this work at ipfs.io and dweb.link](#how-does-this-work-at-ipfsio-and-dweblink)
 - [Contributing](#contributing)
 - [License](#license)
@@ -76,9 +77,10 @@ See [`./docs/environment-variables.md`](./docs/environment-variables.md).
 
 ## FAQ
 
-### How to run with local gateway
+### How to use other gateway as a block backend
 
 All you need is a [trustless gateway](https://specs.ipfs.tech/http-gateways/trustless-gateway/) endpoint that supports [verifiable response types](https://docs.ipfs.tech/reference/http/gateway/#trustless-verifiable-retrieval).
+The minimum requirement is support for `GET /ipfs/cid` with [application/vnd.ipld.raw](https://www.iana.org/assignments/media-types/application/vnd.ipld.raw) (block by block).
 
 To run against a compatible, local trustless gateway provided by [Kubo](https://github.com/ipfs/kubo) or [IPFS Desktop](https://docs.ipfs.tech/install/ipfs-desktop/):
 
@@ -101,17 +103,29 @@ See [_Saturn Backend_ in `./docs/environment-variables.md`](./docs/environment-v
 
 See [`GOLOG_LOG_LEVEL`](./docs/environment-variables.md#golog_log_level).
 
+### How to use tracing
+
+For tracing configuration, please check
+[boxo/docs/tracing.md](https://github.com/ipfs/boxo/blob/main/docs/tracing.md)
+on how to generate the `traceparent` HTTP header in order to be able to easily
+identify specific requests.
+
+
 ### How does this work at ipfs.io and dweb.link
 
-This is WIP, but the high level architecture is:
+This is WIP, but the high level architecture is to move from
+
+**Old Kubo-based architecture:**
 
 ```mermaid
 graph LR
     A(((fa:fa-person HTTP</br>clients)))
-    B[bifrost-gateway]
-    N[[fa:fa-hive bifrost-infra:<br>HTTP load-balancers<br> nginx, TLS termination]]
-    S(((saturn.pl<br>CDN)))
+    K[[Kubo]]
+    N(((BGP Anycast,<br>HTTP load-balancers,<br>TLS termination)))
 
+    D(((DHT)))
+
+    P((( IPFS<br>Peers)))
 
     A -->| Accept: text/html, *| N
     A -->| Accept: application/vnd.ipld.raw | N
@@ -125,10 +139,45 @@ graph LR
     A -->| DNSLink Host: en.wikipedia-on-ipfs.org | N
     A -->| Subdomain Host: cid.ipfs.dweb.link | N
 
-    N --> B
+    N ==>| fa:fa-link HTTP GET <br> Content Path | K
+
+    K -.- D
+    K ===|fa:fa-cube bitswapl | P
+    P -.- D
+```
+
+**New Rhea architecture:**
+```mermaid
+graph LR
+    A(((fa:fa-person HTTP</br>clients)))
+    B[[bifrost-gateway]]
+    N(((BGP Anycast,<br>HTTP load-balancers,<br>TLS termination)))
+    S(((Saturn<br>CDN)))
+    I[[IPNI]]
+    D(((DHT)))
+
+    P((( IPFS<br>Peers)))
+
+    A -->| Accept: text/html, *| N
+    A -->| Accept: application/vnd.ipld.raw | N
+    A -->| Accept: application/vnd.ipld.car | N
+    A -->| Accept: application/vnd.ipld.dag-json | N
+    A -->| Accept: application/vnd.ipld.dag-cbor | N
+    A -->| Accept: application/json | N
+    A -->| Accept: application/cbor | N
+    A -->| Accept: application/x-tar | N
+    A -->| Accept: application/vnd.ipfs.ipns-record | N
+    A -->| DNSLink Host: en.wikipedia-on-ipfs.org | N
+    A -->| Subdomain Host: cid.ipfs.dweb.link | N
+
+    N ==>| fa:fa-link HTTP GET <br> Content Path | B
     
-    B --->|fa:fa-cube HTTP GET Block x N | S
-    B ..->|fa:fa-cubes TBD HTTP GET CAR x N | S
+    B ==>|fa:fa-cube HTTP GET <br> Blocks | S
+    S -.- I 
+    I -.- D 
+    D -.- P -.- I
+  
+    P ===|fa:fa-cube the best block/dag <br> transfer protocol | S
 ```
 
 `bifrost-gateway` nodes are responsible for processing requests to:
@@ -144,10 +193,47 @@ Caveats:
   - Learn more at [Project Rhea (decentralized IPFS gateway)](https://pl-strflt.notion.site/Project-Rhea-decentralized-IPFS-gateway-3d5906e7a0d84bea800d5920005dfea6)
 - Functional gaps facilitated by temporary delegation to legacy Kubo RPC (`/api/v0`) at `https://node[0-3].delegate.ipfs.io` infra (already used by js-ipfs).
 
-### How to use tracing?
+### How does high level overview look like
 
-For tracing configuration, please check: https://github.com/ipfs/boxo/blob/main/docs/tracing.md - this includes
-how to generate a `traceparent` header in order to be able to easily identify specific requests.
+Some high level areas:
+
+```mermaid
+mindmap
+  root[bifrost-gateway]
+    (boxo/gateway.IPFSBackend)
+        Block Backend
+        CAR Backend
+    Ephemeral Storage
+        Block Cache
+        Exchange Backend
+            Plain HTTP Fetch
+            Caboose Saturn Fetch
+    Resolving Content Paths
+        Raw
+        CAR
+        UnixFS
+        IPLD Data Model
+            [DAG-JSON]
+            [DAG-CBOR]
+        Web
+            HTTP Host Header
+            HTML dir listings
+            index.html
+            _redirects
+            HTTP Range Requests
+        Namesys
+            DNSLink
+                EoDoH<br>ENS over DNS over HTTPS
+            IPNS Records
+    Metrics and Tracing
+        Prometheus
+            Counters
+            Histograms
+        OpenTelemetry
+            Spans
+            Exporters
+            Trace Context
+```
 
 ## Contributing
 
