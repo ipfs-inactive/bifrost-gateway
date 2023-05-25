@@ -1,7 +1,9 @@
 bifrost-gateway
 =======================
 
-> A lightweight IPFS Gateway daemon backed by a remote data store. 
+> A lightweight IPFS Gateway daemon backed by a remote data store.
+
+# TOC
 
 - [About](#about)
 - [Usage](#usage)
@@ -9,9 +11,10 @@ bifrost-gateway
   - [Configuration](#configuration)
   - [Docker](#docker)
 - [FAQ](#faq)
-  - [How to run with local gateway](#how-to-run-with-local-gateway)
+  - [How to run with local gateway as a backend](#how-to-run-with-local-gateway-as-a-backend)
   - [How to run with Saturn CDN backend](#how-to-run-with-saturn-cdn-backend)
   - [How to debug](#how-to-debug)
+  - [How to use tracing](#how-to-use-tracing)
   - [How does this work at ipfs.io and dweb.link](#how-does-this-work-at-ipfsio-and-dweblink)
 - [Contributing](#contributing)
 - [License](#license)
@@ -73,9 +76,10 @@ See [`./docs/environment-variables.md`](./docs/environment-variables.md).
 
 ## FAQ
 
-### How to run with local gateway
+### How to use other gateway as a block backend
 
 All you need is a [trustless gateway](https://specs.ipfs.tech/http-gateways/trustless-gateway/) endpoint that supports [verifiable response types](https://docs.ipfs.tech/reference/http/gateway/#trustless-verifiable-retrieval).
+The minimum requirement is support for `GET /ipfs/cid` with [application/vnd.ipld.raw](https://www.iana.org/assignments/media-types/application/vnd.ipld.raw) (block by block).
 
 To run against a compatible, local trustless gateway provided by [Kubo](https://github.com/ipfs/kubo) or [IPFS Desktop](https://docs.ipfs.tech/install/ipfs-desktop/):
 
@@ -97,6 +101,14 @@ See [_Saturn Backend_ in `./docs/environment-variables.md`](./docs/environment-v
 ### How to debug
 
 See [`GOLOG_LOG_LEVEL`](./docs/environment-variables.md#golog_log_level).
+
+### How to use tracing
+
+For tracing configuration, please check
+[boxo/docs/tracing.md](https://github.com/ipfs/boxo/blob/main/docs/tracing.md)
+on how to generate the `traceparent` HTTP header in order to be able to easily
+identify specific requests.
+
 
 ### How does this work at ipfs.io and dweb.link
 
@@ -179,11 +191,6 @@ Caveats:
 - IPFS Backend based on https://saturn.tech and HTTP client talking to it  via [caboose](https://github.com/filecoin-saturn/caboose) with `STRN_LOGGER_SECRET`.
   - Learn more at [Project Rhea (decentralized IPFS gateway)](https://pl-strflt.notion.site/Project-Rhea-decentralized-IPFS-gateway-3d5906e7a0d84bea800d5920005dfea6)
 - Functional gaps facilitated by temporary delegation to legacy Kubo RPC (`/api/v0`) at `https://node[0-3].delegate.ipfs.io` infra (already used by js-ipfs).
-
-### How to use tracing?
-
-For tracing configuration, please check: https://github.com/ipfs/boxo/blob/main/docs/tracing.md - this includes
-how to generate a `traceparent` header in order to be able to easily identify specific requests.
 
 ## Contributing
 
