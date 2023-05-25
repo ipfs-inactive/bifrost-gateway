@@ -117,10 +117,17 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	}
 
 	gwHandler := gateway.NewHandler(gwConf, gwAPI)
+	ipfsHandler := withHTTPMetrics(gwHandler, "ipfs")
+	ipnsHandler := withHTTPMetrics(gwHandler, "ipns")
+
 	mux := http.NewServeMux()
-	mux.Handle("/ipfs/", gwHandler)
-	mux.Handle("/ipns/", gwHandler)
-	mux.Handle("/api/v0/", newKuboRPCHandler(kuboRPC))
+	mux.Handle("/ipfs/", ipfsHandler)
+	mux.Handle("/ipns/", ipnsHandler)
+
+	// TODO: below is legacy which we want to remove, measuring this separately
+	// allows us to decide when is the time to do it.
+	legacyKuboRpcHandler := withHTTPMetrics(newKuboRPCHandler(kuboRPC), "legacyKuboRpc")
+	mux.Handle("/api/v0/", legacyKuboRpcHandler)
 
 	// Note: in the future we may want to make this more configurable.
 	noDNSLink := false
@@ -146,26 +153,10 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 		}
 	}
 
-	// Creates metrics handler for total response size. Matches the same metrics
-	// from Kubo:
-	// https://github.com/ipfs/kubo/blob/e550d9e4761ea394357c413c02ade142c0dea88c/core/corehttp/metrics.go#L79-L152
-	sum := prometheus.NewSummaryVec(prometheus.SummaryOpts{
-		Namespace:  "ipfs",
-		Subsystem:  "http",
-		Name:       "response_size_bytes",
-		Help:       "The HTTP response sizes in bytes.",
-		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001},
-	}, []string{"code"})
-	err = prometheus.Register(sum)
-	if err != nil {
-		return nil, err
-	}
-
 	// Construct the HTTP handler for the gateway.
 	handler := withConnect(mux)
 	handler = http.Handler(gateway.WithHostname(handler, gwAPI, publicGateways, noDNSLink))
 	handler = servertiming.Middleware(handler, nil)
-	handler = promhttp.InstrumentHandlerResponseSize(sum, handler)
 
 	// Add logging.
 	handler = withRequestLogger(handler)
