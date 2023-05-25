@@ -3,8 +3,6 @@ bifrost-gateway
 
 > A lightweight IPFS Gateway daemon backed by a remote data store.
 
-# TOC
-
 - [About](#about)
 - [Usage](#usage)
   - [Local build](#local-build)
