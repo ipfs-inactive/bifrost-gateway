@@ -192,6 +192,48 @@ Caveats:
   - Learn more at [Project Rhea (decentralized IPFS gateway)](https://pl-strflt.notion.site/Project-Rhea-decentralized-IPFS-gateway-3d5906e7a0d84bea800d5920005dfea6)
 - Functional gaps facilitated by temporary delegation to legacy Kubo RPC (`/api/v0`) at `https://node[0-3].delegate.ipfs.io` infra (already used by js-ipfs).
 
+### How does high level overview look like
+
+Some high level areas:
+
+```mermaid
+mindmap
+  root[bifrost-gateway]
+    (boxo/gateway.IPFSBackend)
+        Block Backend
+        CAR Backend
+    Ephemeral Storage
+        Block Cache
+        Exchange Backend
+            Plain HTTP Fetch
+            Caboose Saturn Fetch
+    Resolving Content Paths
+        Raw
+        CAR
+        UnixFS
+        IPLD Data Model
+            [DAG-JSON]
+            [DAG-CBOR]
+        Web
+            HTTP Host Header
+            HTML dir listings
+            index.html
+            _redirects
+            HTTP Range Requests
+        Namesys
+            DNSLink
+                EoDoH<br>ENS over DNS over HTTPS
+            IPNS Records
+    Metrics and Tracing
+        Prometheus
+            Counters
+            Histograms
+        OpenTelemetry
+            Spans
+            Exporters
+            Trace Context
+```
+
 ## Contributing
 
 Contributions are welcome! This repository is part of the IPFS project and therefore governed by our [contributing guidelines](https://github.com/ipfs/community/blob/master/CONTRIBUTING.md).
