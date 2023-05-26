@@ -2,8 +2,9 @@ package lib
 
 import (
 	"context"
-	"github.com/multiformats/go-multihash"
 	"sync"
+
+	"github.com/multiformats/go-multihash"
 
 	pubsub "github.com/cskr/pubsub"
 	blocks "github.com/ipfs/go-block-format"
@@ -113,6 +114,7 @@ func (ps *impl) Subscribe(ctx context.Context, keys ...multihash.Multihash) <-ch
 			case <-ctx.Done():
 				return
 			case <-ps.closed:
+				return
 			case val, ok := <-valuesCh:
 				if !ok {
 					return
@@ -126,6 +128,7 @@ func (ps *impl) Subscribe(ctx context.Context, keys ...multihash.Multihash) <-ch
 					return
 				case blocksCh <- block: // continue
 				case <-ps.closed:
+					return
 				}
 			}
 		}
