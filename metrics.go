@@ -19,18 +19,34 @@ func registerVersionMetric(version string) {
 	m.Set(1)
 }
 
+// httpMetricsObjectives Objectives map defines the quantile objectives for a
+// summary metric in Prometheus. Each key-value pair in the map represents a
+// quantile level and the desired maximum error allowed for that quantile.
+//
+// Adjusting the objectives control the trade-off between
+// accuracy and resource usage for the summary metric.
+//
+// Example: 0.95: 0.005 means that the 95th percentile (P95) should have a
+// maximum error of 0.005, which represents a 0.5% error margin.
+var httpMetricsObjectives = map[float64]float64{
+	0.5:  0.05,
+	0.75: 0.025,
+	0.9:  0.01,
+	0.95: 0.005,
+	0.99: 0.001,
+}
+
 // withHTTPMetrics collects metrics around HTTP request/response count, duration, and size
 // per specific handler. Allows us to track them separately for /ipns and /ipfs.
 func withHTTPMetrics(handler http.Handler, handlerName string) http.Handler {
 
-	// TODO: move HTTP metrics below to separate file
 	// HTTP metric template names match Kubo:
 	// https://github.com/ipfs/kubo/blob/e550d9e4761ea394357c413c02ade142c0dea88c/core/corehttp/metrics.go#L79-L152
 	// This allows Kubo users to migrate to bifrost-gateway and compare global totals.
 	opts := prometheus.SummaryOpts{
 		Namespace:   "ipfs",
 		Subsystem:   "http",
-		Objectives:  map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001},
+		Objectives:  httpMetricsObjectives,
 		ConstLabels: prometheus.Labels{"handler": handlerName},
 	}
 	// Dynamic labels 'method or 'code' are auto-filled
