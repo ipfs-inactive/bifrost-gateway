@@ -3,8 +3,6 @@ package main
 import (
 	"runtime/debug"
 	"time"
-
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 var name = "bifrost-gateway"
@@ -38,16 +36,4 @@ func buildVersion() string {
 		return day + "-" + revision
 	}
 	return "dev-build"
-}
-
-func registerVersionMetric(version string) {
-	m := prometheus.NewGauge(prometheus.GaugeOpts{
-		Namespace:   "ipfs",
-		Subsystem:   "bifrost_gateway",
-		Name:        "info",
-		Help:        "Information about bifrost-gateway instance.",
-		ConstLabels: prometheus.Labels{"version": version},
-	})
-	prometheus.MustRegister(m)
-	m.Set(1)
 }
