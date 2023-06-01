@@ -360,20 +360,20 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 				case <-t.C:
 					return gateway.ErrGatewayTimeout
 				}
-				if !ok || err != nil {
-					if errors.Is(err, io.EOF) {
-						return nil
-					}
-					return err
-				}
 				if blk != nil {
 					if err := bstore.Put(ctx, blk); err != nil {
 						return err
 					}
 					metrics.carBlocksFetchedMetric.Inc()
 					api.notifyOngoingRequests(ctx, notifierKey, blk)
-				} else {
+				} else if ok {
 					graphLog.Errorw("got nil block from car reader", "path", path, "ok", ok, "err", err)
+				}
+				if !ok || err != nil {
+					if errors.Is(err, io.EOF) {
+						return nil
+					}
+					return err
 				}
 			}
 		})
