@@ -336,6 +336,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 					blk, rdErr := cr.Next()
 					if rdErr != nil {
 						err = rdErr
+						return
 					}
 					select {
 					case blkCh <- blk:
