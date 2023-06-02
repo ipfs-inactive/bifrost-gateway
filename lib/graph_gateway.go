@@ -781,7 +781,7 @@ func (f *handoffExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan
 							case retCh <- blk:
 								cs.Add(blk.Cid())
 							case <-ctx.Done():
-							    return
+								return
 							}
 						} else {
 							newCidArr = append(newCidArr, c)
