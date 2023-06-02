@@ -136,9 +136,10 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	// If we're doing tests, ensure the right public gateways are enabled.
 	if os.Getenv("GATEWAY_CONFORMANCE_TEST") == "true" {
 		publicGateways["example.com"] = &gateway.Specification{
-			Paths:         []string{"/ipfs", "/ipns"},
-			NoDNSLink:     noDNSLink,
-			UseSubdomains: true,
+			Paths:                 []string{"/ipfs", "/ipns"},
+			NoDNSLink:             noDNSLink,
+			DeserializedResponses: true,
+			UseSubdomains:         true,
 		}
 	}
 
