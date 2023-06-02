@@ -120,14 +120,16 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	noDNSLink := false
 	publicGateways := map[string]*gateway.Specification{
 		"localhost": {
-			Paths:         []string{"/ipfs", "/ipns"},
-			NoDNSLink:     noDNSLink,
-			UseSubdomains: true,
+			Paths:                 []string{"/ipfs", "/ipns"},
+			NoDNSLink:             noDNSLink,
+			DeserializedResponses: true,
+			UseSubdomains:         true,
 		},
 		"dweb.link": {
-			Paths:         []string{"/ipfs", "/ipns"},
-			NoDNSLink:     noDNSLink,
-			UseSubdomains: true,
+			Paths:                 []string{"/ipfs", "/ipns"},
+			NoDNSLink:             noDNSLink,
+			DeserializedResponses: true,
+			UseSubdomains:         true,
 		},
 	}
 
