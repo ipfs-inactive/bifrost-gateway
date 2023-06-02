@@ -777,8 +777,12 @@ func (f *handoffExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan
 					if !cs.Has(c) {
 						blk, _ := f.bstore.Get(ctx, c)
 						if blk != nil {
-							retCh <- blk
-							cs.Add(blk.Cid())
+							select {
+							case retCh <- blk:
+								cs.Add(blk.Cid())
+							case <-ctx.Done():
+							    return
+							}
 						} else {
 							newCidArr = append(newCidArr, c)
 						}
