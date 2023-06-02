@@ -116,19 +116,6 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 		Headers: headers,
 	}
 
-	gwHandler := gateway.NewHandler(gwConf, gwAPI)
-	ipfsHandler := withHTTPMetrics(gwHandler, "ipfs")
-	ipnsHandler := withHTTPMetrics(gwHandler, "ipns")
-
-	mux := http.NewServeMux()
-	mux.Handle("/ipfs/", ipfsHandler)
-	mux.Handle("/ipns/", ipnsHandler)
-
-	// TODO: below is legacy which we want to remove, measuring this separately
-	// allows us to decide when is the time to do it.
-	legacyKuboRpcHandler := withHTTPMetrics(newKuboRPCHandler(kuboRPC), "legacyKuboRpc")
-	mux.Handle("/api/v0/", legacyKuboRpcHandler)
-
 	// Note: in the future we may want to make this more configurable.
 	noDNSLink := false
 	publicGateways := map[string]*gateway.Specification{
@@ -153,9 +140,25 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 		}
 	}
 
+	gwConf.NoDNSLink = noDNSLink
+	gwConf.DeserializedResponses = true
+	gwConf.PublicGateways = publicGateways
+
+	gwHandler := gateway.NewHandler(gwConf, gwAPI)
+	ipfsHandler := withHTTPMetrics(gwHandler, "ipfs")
+	ipnsHandler := withHTTPMetrics(gwHandler, "ipns")
+
+	mux := http.NewServeMux()
+	mux.Handle("/ipfs/", ipfsHandler)
+	mux.Handle("/ipns/", ipnsHandler)
+	// TODO: below is legacy which we want to remove, measuring this separately
+	// allows us to decide when is the time to do it.
+	legacyKuboRpcHandler := withHTTPMetrics(newKuboRPCHandler(kuboRPC), "legacyKuboRpc")
+	mux.Handle("/api/v0/", legacyKuboRpcHandler)
+
 	// Construct the HTTP handler for the gateway.
 	handler := withConnect(mux)
-	handler = http.Handler(gateway.WithHostname(handler, gwAPI, publicGateways, noDNSLink))
+	handler = http.Handler(gateway.WithHostname(gwConf, gwAPI, handler))
 	handler = servertiming.Middleware(handler, nil)
 
 	// Add logging.
