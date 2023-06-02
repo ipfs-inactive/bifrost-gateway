@@ -82,11 +82,11 @@ require (
 	github.com/ipfs/go-ipfs-redirects-file v0.1.1 // indirect
 	github.com/ipfs/go-ipfs-util v0.0.2 // indirect
 	github.com/ipfs/go-ipld-cbor v0.0.6 // indirect
-	github.com/ipfs/go-ipld-legacy v0.1.2-0.20230530145437-25f06f837f87 // indirect
+	github.com/ipfs/go-ipld-legacy v0.2.1 // indirect
 	github.com/ipfs/go-ipns v0.3.0 // indirect
 	github.com/ipfs/go-libipfs v0.6.0 // indirect
 	github.com/ipfs/go-log v1.0.5 // indirect
-	github.com/ipfs/go-merkledag v0.10.0 // indirect
+	github.com/ipfs/go-merkledag v0.10.1-0.20230601163447-eceea556e7d4 // indirect
 	github.com/ipfs/go-metrics-interface v0.0.1 // indirect
 	github.com/ipfs/go-verifcid v0.0.2 // indirect
 	github.com/ipld/go-car v0.6.0 // indirect
