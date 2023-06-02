@@ -282,6 +282,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 	exch := &handoffExchange{
 		startingExchange: carFetchingExch,
 		followupExchange: &blockFetcherExchWrapper{api.blockFetcher},
+		bstore:           bstore,
 		handoffCh:        doneWithFetcher,
 		metrics:          api.metrics,
 	}
@@ -719,6 +720,7 @@ var _ exchange.Interface = (*inboundBlockExchange)(nil)
 
 type handoffExchange struct {
 	startingExchange, followupExchange exchange.Interface
+	bstore                             blockstore.Blockstore
 	handoffCh                          <-chan struct{}
 	metrics                            *GraphGatewayMetrics
 }
@@ -773,9 +775,20 @@ func (f *handoffExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan
 				var newCidArr []cid.Cid
 				for _, c := range cids {
 					if !cs.Has(c) {
-						newCidArr = append(newCidArr, c)
+						blk, _ := f.bstore.Get(ctx, c)
+						if blk != nil {
+							retCh <- blk
+							cs.Add(blk.Cid())
+						} else {
+							newCidArr = append(newCidArr, c)
+						}
 					}
 				}
+
+				if len(newCidArr) == 0 {
+					return
+				}
+
 				graphLog.Debugw("needed to use use a backup fetcher for cids", "cids", newCidArr)
 				f.metrics.blockRecoveryAttemptMetric.Add(float64(len(newCidArr)))
 				fch, err := f.followupExchange.GetBlocks(ctx, newCidArr)
