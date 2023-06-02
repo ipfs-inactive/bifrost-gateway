@@ -329,17 +329,19 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 
 			cbCtx, cncl := context.WithCancel(cctx)
 			defer cncl()
-			blkCh := make(chan blocks.Block, 1)
+
+			type blockRead struct {
+				block blocks.Block
+				err   error
+			}
+
+			blkCh := make(chan blockRead, 1)
 			go func() {
 				defer close(blkCh)
 				for {
 					blk, rdErr := cr.Next()
-					if rdErr != nil {
-						err = rdErr
-						return
-					}
 					select {
-					case blkCh <- blk:
+					case blkCh <- blockRead{blk, rdErr}:
 					case <-cbCtx.Done():
 						return
 					}
@@ -349,10 +351,10 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 			// initially set a higher timeout here so that if there's an initial timeout error we get it from the car reader.
 			t := time.NewTimer(GetBlockTimeout * 2)
 			for {
-				var blk blocks.Block
+				var blkRead blockRead
 				var ok bool
 				select {
-				case blk, ok = <-blkCh:
+				case blkRead, ok = <-blkCh:
 					if !t.Stop() {
 						<-t.C
 					}
@@ -360,20 +362,18 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 				case <-t.C:
 					return gateway.ErrGatewayTimeout
 				}
-				if blk != nil {
-					if err := bstore.Put(ctx, blk); err != nil {
+				if !ok || blkRead.err != nil {
+					if errors.Is(blkRead.err, io.EOF) {
+						return nil
+					}
+					return blkRead.err
+				}
+				if blkRead.block != nil {
+					if err := bstore.Put(ctx, blkRead.block); err != nil {
 						return err
 					}
 					metrics.carBlocksFetchedMetric.Inc()
-					api.notifyOngoingRequests(ctx, notifierKey, blk)
-				} else if ok {
-					graphLog.Errorw("got nil block from car reader", "path", path, "ok", ok, "err", err)
-				}
-				if !ok || err != nil {
-					if errors.Is(err, io.EOF) {
-						return nil
-					}
-					return err
+					api.notifyOngoingRequests(ctx, notifierKey, blkRead.block)
 				}
 			}
 		})
