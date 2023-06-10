@@ -29,6 +29,8 @@ import (
 	format "github.com/ipfs/go-ipld-format"
 	golog "github.com/ipfs/go-log/v2"
 	"github.com/ipld/go-car"
+	carv2 "github.com/ipld/go-car/v2"
+	"github.com/ipld/go-car/v2/storage"
 	routinghelpers "github.com/libp2p/go-libp2p-routing-helpers"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
@@ -471,11 +473,11 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 	rangeCount := len(byteRanges)
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "entity", "entityRanges": strconv.Itoa(rangeCount)}).Inc()
 
-	// IPIP-402
-	carParams := "?format=car&dag-scope=entity"
+	// TODO: remove &bytes= &depth= and &car-scope from all CAR request after transition is done:
+	// https://github.com/ipfs/bifrost-gateway/issues/80
+	carParams := "?format=car&dag-scope=entity&car-scope=file&depth=1"
 
-	// If request was HTTP Range Request fetch CAR with entity-bytes=from:to to
-	// get minimal set of blocks
+	// fetch CAR with &bytes= to get minimal set of blocks for the request
 	// Note: majority of requests have 0 or max 1 ranges. if there are more ranges than one,
 	// that is a niche edge cache we don't prefetch as CAR and use fallback blockstore instead.
 	if rangeCount > 0 {
@@ -497,7 +499,17 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 		} else {
 			bytesBuilder.WriteString("*")
 		}
+
+		// TODO: &bytes= is present only for transition reasons, remove below block after https://github.com/ipfs/bifrost-gateway/issues/80 is done
+		if strings.HasSuffix(carParams, "&depth=1") {
+			parts := strings.Split(bytesBuilder.String(), "=")
+			value := parts[1]
+			bytesBuilder.WriteString("&bytes=")
+			bytesBuilder.WriteString(value)
+		}
+
 		carParams += bytesBuilder.String()
+
 	}
 
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+carParams)
@@ -516,7 +528,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "all", "entityRanges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=all")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=all&car-scope=all&depth=all")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -534,7 +546,7 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "block", "entityRanges": "0"}).Inc()
 	// TODO: if path is `/ipfs/cid`, we should use ?format=raw
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=block")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=block&car-scope=block&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -556,7 +568,7 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 	api.metrics.bytesRangeStartMetric.Observe(0)
 	api.metrics.bytesRangeSizeMetric.Observe(1024)
 
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=entity&entity-bytes=0:1023")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=entity&entity-bytes=0:1023&car-scope=file&depth=1&bytes=0:1023")
 
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
@@ -574,7 +586,7 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 
 func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "block", "entityRanges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=block")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=block&car-scope=block&depth=0")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, err
 	}
@@ -583,13 +595,73 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 }
 
 func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath, params gateway.CarParams) (gateway.ContentPathMetadata, io.ReadCloser, error) {
-	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "all", "entityRanges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=all")
+	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": string(params.Scope), "entityRanges": "0"}).Inc()
+	rootCid, err := getRootCid(path)
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
-	defer closeFn()
-	return blkgw.GetCAR(ctx, path, params)
+
+	r, w := io.Pipe()
+	go func() {
+		cw, err := storage.NewWritable(w, []cid.Cid{cid.MustParse("bafkqaaa")}, carv2.WriteAsCarV1(true))
+		if err != nil {
+			// io.PipeWriter.CloseWithError always returns nil.
+			_ = w.CloseWithError(err)
+			return
+		}
+		numBlocksSent := 0
+		err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=all&car-scope=all&depth=all", func(resource string, reader io.Reader) error {
+			numBlocksThisCall := 0
+			gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
+			if err != nil {
+				return err
+			}
+			teeBlock := func(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+				blk, err := gb(ctx, c)
+				if err != nil {
+					return nil, err
+				}
+				if numBlocksThisCall >= numBlocksSent {
+					err = cw.Put(ctx, blk.Cid().KeyString(), blk.RawData())
+					if err != nil {
+						return nil, fmt.Errorf("error writing car block: %w", err)
+					}
+					numBlocksSent++
+				}
+				numBlocksThisCall++
+				return blk, nil
+			}
+			r, l := getIPFSPathResolverAndLsysFromBlockReader(ctx, teeBlock)
+			err = walkGatewaySimpleSelector(ctx, ipfspath.FromString(path.String()), params, l, r)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+		// io.PipeWriter.CloseWithError always returns nil.
+		_ = w.CloseWithError(err)
+	}()
+
+	return gateway.ContentPathMetadata{
+		PathSegmentRoots: []cid.Cid{rootCid},
+		LastSegment:      nil,
+		ContentType:      "",
+	}, r, nil
+}
+
+func getRootCid(imPath gateway.ImmutablePath) (cid.Cid, error) {
+	imPathStr := imPath.String()
+	if !strings.HasPrefix(imPathStr, "/ipfs/") {
+		return cid.Undef, fmt.Errorf("path does not have /ipfs/ prefix")
+	}
+
+	firstSegment, _, _ := strings.Cut(imPathStr[6:], "/")
+	rootCid, err := cid.Decode(firstSegment)
+	if err != nil {
+		return cid.Undef, err
+	}
+
+	return rootCid, nil
 }
 
 func (api *GraphGateway) IsCached(ctx context.Context, path ifacepath.Path) bool {
