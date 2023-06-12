@@ -1,9 +1,11 @@
 package lib
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ipld/go-ipld-prime/linking"
 	"io"
 	"sync"
 	"time"
@@ -14,7 +16,6 @@ import (
 	bsfetcher "github.com/ipfs/boxo/fetcher/impl/blockservice"
 	"github.com/ipfs/boxo/gateway"
 	"github.com/ipfs/boxo/ipld/car"
-	ipfspath "github.com/ipfs/boxo/path"
 	"github.com/ipfs/boxo/path/resolver"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
@@ -70,7 +71,6 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 	}
 
 	cbCtx, cncl := context.WithCancel(ctx)
-	defer cncl()
 
 	type blockRead struct {
 		block blocks.Block
@@ -79,11 +79,15 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 
 	blkCh := make(chan blockRead, 1)
 	go func() {
+		defer cncl()
 		defer close(blkCh)
 		for {
 			blk, rdErr := cr.Next()
 			select {
 			case blkCh <- blockRead{blk, rdErr}:
+				if rdErr != nil {
+					cncl()
+				}
 			case <-cbCtx.Done():
 				return
 			}
@@ -116,7 +120,7 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 			return nil, gateway.ErrGatewayTimeout
 		}
 		if !ok || blkRead.err != nil {
-			if errors.Is(blkRead.err, io.EOF) {
+			if !ok || errors.Is(blkRead.err, io.EOF) {
 				return nil, io.EOF
 			}
 			return nil, blkRead.err
@@ -136,22 +140,32 @@ func getIPFSPathResolverAndLsysFromBlockReader(ctx context.Context, fn getBlock)
 	fetcher := bsfetcher.NewFetcherConfig(
 		blockservice.New(blockstore.NewBlockstore(&datastore.NullDatastore{}), &blockFetcherExchWrapper{f: &gbf{fn}}))
 	fetcher.NodeReifier = unixfsnode.Reify
+	fetcher.PrototypeChooser = dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
+		if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
+			return tlnkNd.LinkTargetNodePrototype(), nil
+		}
+		return basicnode.Prototype.Any, nil
+	})
 	res := resolver.NewBasicResolver(fetcher)
 	lsys := cidlink.DefaultLinkSystem()
+	lsys.StorageReadOpener = func(linkContext linking.LinkContext, link datamodel.Link) (io.Reader, error) {
+		c := link.(cidlink.Link).Cid
+		blk, err := fn(linkContext.Ctx, c)
+		if err != nil {
+			return nil, err
+		}
+		return bytes.NewReader(blk.RawData()), nil
+	}
+	lsys.TrustedStorage = true
 	unixfsnode.AddUnixFSReificationToLinkSystem(&lsys)
 	return res, &lsys
 }
 
 // walkGatewaySimpleSelector walks the subgraph described by the path and terminal element parameters
-func walkGatewaySimpleSelector(ctx context.Context, p ipfspath.Path, params gateway.CarParams, lsys *ipld.LinkSystem, pathResolver resolver.Resolver) error {
-	// First resolve the path since we always need to.
-	lastCid, remainder, err := pathResolver.ResolveToLastNode(ctx, p)
-	if err != nil {
-		return err
-	}
-
+func walkGatewaySimpleSelector(ctx context.Context, lastCid cid.Cid, params gateway.CarParams, lsys *ipld.LinkSystem, pathResolver resolver.Resolver) error {
 	lctx := ipld.LinkContext{Ctx: ctx}
 	pathTerminalCidLink := cidlink.Link{Cid: lastCid}
+	var err error
 
 	// If the scope is the block, now we only need to retrieve the root block of the last element of the path.
 	if params.Scope == gateway.DagScopeBlock {
@@ -210,9 +224,6 @@ func walkGatewaySimpleSelector(ctx context.Context, p ipfspath.Path, params gate
 
 	if pbn, ok := lastCidNode.(dagpb.PBNode); !ok {
 		// If it's not valid dag-pb then we're done
-		return nil
-	} else if len(remainder) > 0 {
-		// If we're trying to path into dag-pb node that's invalid and we're done
 		return nil
 	} else if !pbn.FieldData().Exists() {
 		// If it's not valid UnixFS then we're done
