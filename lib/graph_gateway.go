@@ -1,18 +1,20 @@
 package lib
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	gopath "path"
-	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ipfs/boxo/path/resolver"
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/boxo/blockservice"
@@ -22,6 +24,8 @@ import (
 	exchange "github.com/ipfs/boxo/exchange"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/gateway"
+	"github.com/ipfs/boxo/ipld/merkledag"
+	"github.com/ipfs/boxo/ipld/unixfs"
 	"github.com/ipfs/boxo/namesys"
 	"github.com/ipfs/boxo/namesys/resolve"
 	ipfspath "github.com/ipfs/boxo/path"
@@ -29,18 +33,22 @@ import (
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
 	golog "github.com/ipfs/go-log/v2"
+	"github.com/ipfs/go-unixfsnode"
+	ufsData "github.com/ipfs/go-unixfsnode/data"
 	"github.com/ipld/go-car"
 	carv2 "github.com/ipld/go-car/v2"
 	"github.com/ipld/go-car/v2/storage"
+	dagpb "github.com/ipld/go-codec-dagpb"
 	"github.com/ipld/go-ipld-prime"
+	"github.com/ipld/go-ipld-prime/datamodel"
 	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/ipld/go-ipld-prime/node/basicnode"
+	"github.com/ipld/go-ipld-prime/schema"
 	routinghelpers "github.com/libp2p/go-libp2p-routing-helpers"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multicodec"
-	"github.com/multiformats/go-multihash"
 	"github.com/prometheus/client_golang/prometheus"
-	"go.uber.org/multierr"
 )
 
 var graphLog = golog.Logger("backend/graph")
@@ -478,7 +486,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 
 	// TODO: remove &bytes= &depth= and &car-scope from all CAR request after transition is done:
 	// https://github.com/ipfs/bifrost-gateway/issues/80
-	carParams := "?format=car&dag-scope=entity&car-scope=file&depth=1"
+	carParams := "?format=car&dag-scope=entity"
 
 	// fetch CAR with &bytes= to get minimal set of blocks for the request
 	// Note: majority of requests have 0 or max 1 ranges. if there are more ranges than one,
@@ -503,35 +511,353 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 			bytesBuilder.WriteString("*")
 		}
 
-		// TODO: &bytes= is present only for transition reasons, remove below block after https://github.com/ipfs/bifrost-gateway/issues/80 is done
-		if strings.HasSuffix(carParams, "&depth=1") {
-			parts := strings.Split(bytesBuilder.String(), "=")
-			value := parts[1]
-			bytesBuilder.WriteString("&bytes=")
-			bytesBuilder.WriteString(value)
+		carParams += bytesBuilder.String()
+	}
+
+	rootCid, err := getRootCid(path)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	p := ipfspath.FromString(path.String())
+
+	type terminalPathType struct {
+		resp    *gateway.GetResponse
+		err     error
+		lastCid cid.Cid
+	}
+
+	terminalPathElementCh := make(chan terminalPathType, 1)
+	errNotUnixFS := fmt.Errorf("data was not unixfs")
+
+	var terminalFile *multiReadCloser
+	var terminalDir chan unixfs.LinkResult
+	lastDirLinkNum := 0
+	go func() {
+		cctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		err = api.fetcher.Fetch(cctx, path.String()+"?format=car&dag-scope=all", func(resource string, reader io.Reader) error {
+			gb, err := carToLinearBlockGetter(cctx, reader, api.metrics)
+			if err != nil {
+				return err
+			}
+			r, lsys := getIPFSPathResolverAndLsysFromBlockReader(cctx, gb)
+			// First resolve the path since we always need to.
+			lastCid, remainder, err := r.ResolveToLastNode(cctx, p)
+			if err != nil {
+				return err
+			}
+
+			lctx := ipld.LinkContext{Ctx: cctx}
+			pathTerminalCidLink := cidlink.Link{Cid: lastCid}
+
+			if len(remainder) > 0 {
+				terminalPathElementCh <- terminalPathType{err: errNotUnixFS}
+				return nil
+			}
+
+			// From now on, dag-scope=entity!
+			// Since we need more of the graph load it to figure out what we have
+			// This includes determining if the terminal node is UnixFS or not
+			pc := dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
+				if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
+					return tlnkNd.LinkTargetNodePrototype(), nil
+				}
+				return basicnode.Prototype.Any, nil
+			})
+
+			np, err := pc(pathTerminalCidLink, lctx)
+			if err != nil {
+				return err
+			}
+
+			lastCidNode, nodeBytes, err := lsys.LoadPlusRaw(lctx, pathTerminalCidLink, np)
+			if err != nil {
+				return err
+			}
+
+			if pbn, ok := lastCidNode.(dagpb.PBNode); !ok {
+				// If it's not valid dag-pb then we're done
+				return nil
+			} else if len(remainder) > 0 {
+				// If we're trying to path into dag-pb node that's invalid and we're done
+				return nil
+			} else if !pbn.FieldData().Exists() {
+				// If it's not valid UnixFS then we're done
+				return nil
+			} else if unixfsFieldData, decodeErr := ufsData.DecodeUnixFSData(pbn.Data.Must().Bytes()); decodeErr != nil {
+				// If it's not valid dag-pb and UnixFS then we're done
+				return nil
+			} else {
+				switch fieldNum := unixfsFieldData.FieldDataType().Int(); fieldNum {
+				case ufsData.Data_Symlink:
+					fd := unixfsFieldData.FieldData()
+					if fd.Exists() {
+						lnkTarget := string(fd.Must().Bytes())
+						f := files.NewLinkFile(lnkTarget, nil)
+						s, ok := f.(*files.Symlink)
+						if !ok {
+							terminalPathElementCh <- terminalPathType{err: fmt.Errorf("should be unreachable: symlink does not have a symlink type")}
+							return nil
+						}
+						terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromSymlink(s, int64(len(lnkTarget))), lastCid: lastCid}
+						return nil
+					}
+					terminalPathElementCh <- terminalPathType{err: fmt.Errorf("UnixFS Symlink does not contain target")}
+					return nil
+				case ufsData.Data_Metadata:
+					terminalPathElementCh <- terminalPathType{err: fmt.Errorf("UnixFS Metadata unsupported")}
+					return nil
+				case ufsData.Data_HAMTShard, ufsData.Data_Directory:
+					blk, err := blocks.NewBlockWithCid(nodeBytes, lastCid)
+					if err != nil {
+						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("could not create block: %w", err)}
+						return nil
+					}
+					dirRootNd, err := merkledag.ProtoNodeConverter(blk, lastCidNode)
+					if err != nil {
+						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("could not create dag-pb universal block from UnixFS directory root: %w", err)}
+						return nil
+					}
+					pn, ok := dirRootNd.(*merkledag.ProtoNode)
+					if !ok {
+						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("could not create dag-pb node from UnixFS directory root: %w", err)}
+						return nil
+					}
+
+					sz, err := pn.Size()
+					if err != nil {
+						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("could not get cumulative size from dag-pb node: %w", err)}
+						return nil
+					}
+
+					lnks := make(chan unixfs.LinkResult)
+					defer close(lnks)
+					if terminalDir == nil {
+						terminalDir = lnks
+					}
+					terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromDirectoryListing(sz, lnks, nil)}
+
+					dirLinkNum := 0
+					switch fieldNum {
+					case ufsData.Data_Directory:
+						iter := pbn.Links.Iterator()
+						for !iter.Done() {
+							_, v := iter.Next()
+							c := v.Hash.Link().(cidlink.Link).Cid
+							var name string
+							var size int64
+							if v.Name.Exists() {
+								name = v.Name.Must().String()
+							}
+							if v.Tsize.Exists() {
+								size = v.Tsize.Must().Int()
+							}
+							lnk := unixfs.LinkResult{Link: &format.Link{
+								Name: name,
+								Size: uint64(size),
+								Cid:  c,
+							}}
+
+							dirLinkNum++
+							if dirLinkNum-1 <= lastDirLinkNum {
+								continue
+							}
+
+							select {
+							case lnks <- lnk:
+								lastDirLinkNum++
+							case <-cctx.Done():
+								// TODO: what here, send an error with another select?
+								return nil
+							}
+						}
+					case ufsData.Data_HAMTShard:
+						// Note: we are making up the entries
+						dirNd, err := unixfsnode.Reify(lctx, pbn, lsys)
+						if err != nil {
+							select {
+							case lnks <- unixfs.LinkResult{Err: fmt.Errorf("could not reify sharded directory: %w", err)}:
+							case <-cctx.Done():
+								// TODO: what here?
+							}
+							return nil
+						}
+
+						mi := dirNd.MapIterator()
+						for !mi.Done() {
+							k, v, err := mi.Next()
+							if err != nil {
+								return err
+							}
+							keyStr, err := k.AsString()
+							if err != nil {
+								select {
+								case lnks <- unixfs.LinkResult{Err: fmt.Errorf("could not interpret directory key as string: %w", err)}:
+								case <-cctx.Done():
+									// TODO: what here?
+								}
+								return nil
+							}
+							valLink, err := v.AsLink()
+							if err != nil {
+								select {
+								case lnks <- unixfs.LinkResult{Err: fmt.Errorf("could not interpret directory value as link: %w", err)}:
+								case <-cctx.Done():
+									// TODO: what here?
+								}
+								return nil
+							}
+							valCid := valLink.(cidlink.Link).Cid
+							lnk := unixfs.LinkResult{Link: &format.Link{
+								Name: keyStr,
+								Size: uint64(0),
+								Cid:  valCid,
+							}}
+
+							dirLinkNum++
+							if dirLinkNum-1 <= lastDirLinkNum {
+								continue
+							}
+
+							select {
+							case lnks <- lnk:
+								lastDirLinkNum++
+							case <-cctx.Done():
+								// TODO: what here?
+							}
+						}
+					}
+					return nil
+				case ufsData.Data_Raw, ufsData.Data_File:
+					nd, err := unixfsnode.Reify(lctx, lastCidNode, lsys)
+					if err != nil {
+						return err
+					}
+
+					fnd, ok := nd.(datamodel.LargeBytesNode)
+					if !ok {
+						return fmt.Errorf("could not process file since it did not present as large bytes")
+					}
+					f, err := fnd.AsLargeBytes()
+					if err != nil {
+						return err
+					}
+
+					fileSize, err := f.Seek(0, io.SeekEnd)
+					if err != nil {
+						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("unable to get UnixFS file size: %w", err)}
+						return nil
+					}
+					_, err = f.Seek(0, io.SeekStart)
+					if err != nil {
+						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("unable to get reset UnixFS file reader: %w", err)}
+						return nil
+					}
+
+					if terminalFile == nil {
+						mrc := &multiReadCloser{
+							closeFn:   nil,
+							mr:        f,
+							closed:    make(chan struct{}),
+							newReader: make(chan io.Reader),
+							retErr:    nil,
+							isClosed:  false,
+						}
+						terminalFile = mrc
+						terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromReader(files.NewReaderFile(mrc), fileSize), lastCid: lastCid}
+					} else {
+						select {
+						case terminalFile.newReader <- f:
+						case <-cctx.Done():
+							// TODO: what here?
+							return nil
+						}
+					}
+
+					_, err = io.Copy(io.Discard, terminalFile)
+					if err != nil {
+						return err
+					}
+					return nil
+				default:
+					terminalPathElementCh <- terminalPathType{err: fmt.Errorf("unknown UnixFS field type")}
+					return nil
+				}
+			}
+		})
+	}()
+
+	select {
+	case t := <-terminalPathElementCh:
+		if t.err != nil {
+			return gateway.ContentPathMetadata{}, nil, t.err
 		}
 
-		carParams += bytesBuilder.String()
-
+		md := gateway.ContentPathMetadata{
+			PathSegmentRoots: []cid.Cid{rootCid},
+			LastSegment:      ifacepath.NewResolvedPath(p, t.lastCid, rootCid, ""),
+		}
+		return md, t.resp, nil
+	case <-ctx.Done():
+		return gateway.ContentPathMetadata{}, nil, ctx.Err()
 	}
-
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+carParams)
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	md, gr, err := blkgw.Get(ctx, path, byteRanges...)
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-
-	//TODO: interfaces here aren't good enough so we're getting around the problem this way
-	runtime.SetFinalizer(gr, func(_ *gateway.GetResponse) { closeFn() })
-	return md, gr, nil
 }
+
+type multiReadCloser struct {
+	closeFn   func() error
+	mr        io.Reader
+	closed    chan struct{}
+	newReader chan io.Reader
+	retErr    error
+	isClosed  bool
+}
+
+func (r *multiReadCloser) Read(p []byte) (n int, err error) {
+	if r.retErr == nil {
+		n, err = r.mr.Read(p)
+		if err == nil || err == io.EOF {
+			return n, err
+		}
+
+		if n > 0 {
+			r.retErr = err
+			return n, nil
+		}
+	} else {
+		err = r.retErr
+	}
+
+	select {
+	case <-r.closed:
+		return n, err
+	case newReader, ok := <-r.newReader:
+		if ok {
+			r.mr = io.MultiReader(r.mr, newReader)
+			return r.Read(p)
+		}
+		return n, err
+	}
+}
+
+func (r *multiReadCloser) Close() error {
+	if r.isClosed {
+		return nil
+	}
+
+	close(r.newReader)
+	close(r.closed)
+
+	if r.closeFn == nil {
+		return nil
+	}
+	return r.closeFn()
+}
+
+var _ io.ReadCloser = (*multiReadCloser)(nil)
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "all", "entityRanges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=all&car-scope=all&depth=all")
+	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=all")
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
@@ -557,80 +883,27 @@ func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePat
 
 	var md gateway.ContentPathMetadata
 	var f files.File
+	var ipldError error
 	// TODO: fallback to dynamic fetches in case we haven't requested enough data
 	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=block", func(resource string, reader io.Reader) error {
-		gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
-		if err != nil {
-			return err
-		}
-		r, lsys := getIPFSPathResolverAndLsysFromBlockReader(ctx, gb)
+		return checkRetryableError(&ipldError, func() error {
+			gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
+			if err != nil {
+				return err
+			}
+			r, lsys := getIPFSPathResolverAndLsysFromBlockReader(ctx, gb)
 
-		// First resolve the path since we always need to.
-		lastCid, remainder, err := r.ResolveToLastNode(ctx, p)
-		if err != nil {
-			return err
-		}
+			// First resolve the path since we always need to.
+			lastCid, remainder, err := r.ResolveToLastNode(ctx, p)
+			if err != nil {
+				return err
+			}
 
-		md = gateway.ContentPathMetadata{
-			PathSegmentRoots: []cid.Cid{rootCid},
-			LastSegment:      ifacepath.NewResolvedPath(p, lastCid, rootCid, gopath.Join(remainder...)),
-		}
+			md = gateway.ContentPathMetadata{
+				PathSegmentRoots: []cid.Cid{rootCid},
+				LastSegment:      ifacepath.NewResolvedPath(p, lastCid, rootCid, gopath.Join(remainder...)),
+			}
 
-		lctx := ipld.LinkContext{Ctx: ctx}
-		pathTerminalCidLink := cidlink.Link{Cid: lastCid}
-
-		data, err := lsys.LoadRaw(lctx, pathTerminalCidLink)
-		if err != nil {
-			return err
-		}
-
-		f = files.NewBytesFile(data)
-		return nil
-	})
-
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-
-	return md, f, nil
-}
-
-func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "entity", "entityRanges": "1"}).Inc()
-
-	// TODO:  we probably want to move this either to boxo, or at least to loadRequestIntoSharedBlockstoreAndBlocksGateway
-	api.metrics.bytesRangeStartMetric.Observe(0)
-	api.metrics.bytesRangeSizeMetric.Observe(1024)
-
-	rootCid, err := getRootCid(path)
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	p := ipfspath.FromString(path.String())
-
-	var md gateway.ContentPathMetadata
-	var f files.File
-	// TODO: fallback to dynamic fetches in case we haven't requested enough data
-	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=entity&entity-bytes=0:3071", func(resource string, reader io.Reader) error {
-		gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
-		if err != nil {
-			return err
-		}
-		r, lsys := getIPFSPathResolverAndLsysFromBlockReader(ctx, gb)
-
-		// First resolve the path since we always need to.
-		lastCid, remainder, err := r.ResolveToLastNode(ctx, p)
-		if err != nil {
-			return err
-		}
-
-		md = gateway.ContentPathMetadata{
-			PathSegmentRoots: []cid.Cid{rootCid},
-			LastSegment:      ifacepath.NewResolvedPath(p, lastCid, rootCid, gopath.Join(remainder...)),
-		}
-
-		// It's not UnixFS if there is a remainder
-		if len(remainder) > 0 {
 			lctx := ipld.LinkContext{Ctx: ctx}
 			pathTerminalCidLink := cidlink.Link{Cid: lastCid}
 
@@ -641,16 +914,184 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 
 			f = files.NewBytesFile(data)
 			return nil
-		}
-
-		return nil
+		})
 	})
 
+	if ipldError != nil {
+		err = ipldError
+	}
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
 
 	return md, f, nil
+}
+
+func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, *gateway.HeadResponse, error) {
+	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "entity", "entityRanges": "1"}).Inc()
+
+	// TODO:  we probably want to move this either to boxo, or at least to loadRequestIntoSharedBlockstoreAndBlocksGateway
+	api.metrics.bytesRangeStartMetric.Observe(0)
+	api.metrics.bytesRangeSizeMetric.Observe(3071)
+
+	rootCid, err := getRootCid(path)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	p := ipfspath.FromString(path.String())
+
+	var md gateway.ContentPathMetadata
+	var n *gateway.HeadResponse
+	var ipldError error
+	// TODO: fallback to dynamic fetches in case we haven't requested enough data
+	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=entity&entity-bytes=0:3071", func(resource string, reader io.Reader) error {
+		return checkRetryableError(&ipldError, func() error {
+			gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
+			if err != nil {
+				return err
+			}
+			r, lsys := getIPFSPathResolverAndLsysFromBlockReader(ctx, gb)
+
+			// First resolve the path since we always need to.
+			lastCid, remainder, err := r.ResolveToLastNode(ctx, p)
+			if err != nil {
+				return err
+			}
+
+			md = gateway.ContentPathMetadata{
+				PathSegmentRoots: []cid.Cid{rootCid},
+				LastSegment:      ifacepath.NewResolvedPath(p, lastCid, rootCid, gopath.Join(remainder...)),
+			}
+
+			lctx := ipld.LinkContext{Ctx: ctx}
+			pathTerminalCidLink := cidlink.Link{Cid: lastCid}
+
+			// Load the block at the root of the terminal path element
+			dataBytes, err := lsys.LoadRaw(lctx, pathTerminalCidLink)
+			if err != nil {
+				return err
+			}
+
+			// It's not UnixFS if there is a remainder or it's not dag-pb
+			if len(remainder) > 0 || lastCid.Type() != uint64(multicodec.DagPb) {
+				n = gateway.NewHeadResponseForFile(files.NewBytesFile(dataBytes), int64(len(dataBytes)))
+				return nil
+			}
+
+			// Let's figure out if the terminal element is valid UnixFS and if so what kind
+			pc := dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
+				if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
+					return tlnkNd.LinkTargetNodePrototype(), nil
+				}
+				return basicnode.Prototype.Any, nil
+			})
+
+			np, err := pc(pathTerminalCidLink, lctx)
+			if err != nil {
+				return err
+			}
+
+			nodeDecoder, err := lsys.DecoderChooser(pathTerminalCidLink)
+			if err != nil {
+				return err
+			}
+
+			nb := np.NewBuilder()
+			err = nodeDecoder(nb, bytes.NewReader(dataBytes))
+			if err != nil {
+				return err
+			}
+			lastCidNode := nb.Build()
+
+			if pbn, ok := lastCidNode.(dagpb.PBNode); !ok {
+				// This shouldn't be possible since we already checked for dag-pb usage
+				return fmt.Errorf("node was not go-codec-dagpb node")
+			} else if !pbn.FieldData().Exists() {
+				// If it's not valid UnixFS then just return the block bytes
+				n = gateway.NewHeadResponseForFile(files.NewBytesFile(dataBytes), int64(len(dataBytes)))
+				return nil
+			} else if unixfsFieldData, decodeErr := ufsData.DecodeUnixFSData(pbn.Data.Must().Bytes()); decodeErr != nil {
+				// If it's not valid UnixFS then just return the block bytes
+				n = gateway.NewHeadResponseForFile(files.NewBytesFile(dataBytes), int64(len(dataBytes)))
+				return nil
+			} else {
+				switch fieldNum := unixfsFieldData.FieldDataType().Int(); fieldNum {
+				case ufsData.Data_Directory, ufsData.Data_HAMTShard:
+					blk, err := blocks.NewBlockWithCid(dataBytes, lastCid)
+					if err != nil {
+						return fmt.Errorf("could not create block: %w", err)
+					}
+					dirRootNd, err := merkledag.ProtoNodeConverter(blk, lastCidNode)
+					if err != nil {
+						return fmt.Errorf("could not create dag-pb universal block from UnixFS directory root: %w", err)
+					}
+					pn, ok := dirRootNd.(*merkledag.ProtoNode)
+					if !ok {
+						return fmt.Errorf("could not create dag-pb node from UnixFS directory root: %w", err)
+					}
+
+					sz, err := pn.Size()
+					if err != nil {
+						return fmt.Errorf("could not get cumulative size from dag-pb node: %w", err)
+					}
+
+					n = gateway.NewHeadResponseForDirectory(int64(sz))
+					return nil
+				case ufsData.Data_Symlink:
+					fd := unixfsFieldData.FieldData()
+					if fd.Exists() {
+						n = gateway.NewHeadResponseForSymlink(int64(len(fd.Must().Bytes())))
+						return nil
+					}
+					// If there is no target then it's invalid so just return the block
+					gateway.NewHeadResponseForFile(files.NewBytesFile(dataBytes), int64(len(dataBytes)))
+					return nil
+				case ufsData.Data_Metadata:
+					n = gateway.NewHeadResponseForFile(files.NewBytesFile(dataBytes), int64(len(dataBytes)))
+					return nil
+				case ufsData.Data_Raw, ufsData.Data_File:
+					ufsNode, err := unixfsnode.Reify(lctx, pbn, lsys)
+					if err != nil {
+						return err
+					}
+					fileNode, ok := ufsNode.(datamodel.LargeBytesNode)
+					if !ok {
+						return fmt.Errorf("data not a large bytes node despite being UnixFS bytes")
+					}
+					f, err := fileNode.AsLargeBytes()
+					if err != nil {
+						return err
+					}
+
+					fileSize, err := f.Seek(0, io.SeekEnd)
+					if err != nil {
+						return fmt.Errorf("unable to get UnixFS file size: %w", err)
+					}
+					_, err = f.Seek(0, io.SeekStart)
+					if err != nil {
+						return fmt.Errorf("unable to get reset UnixFS file reader: %w", err)
+					}
+
+					out, err := io.ReadAll(io.LimitReader(f, 3072))
+					if errors.Is(err, io.EOF) {
+						n = gateway.NewHeadResponseForFile(files.NewBytesFile(out), fileSize)
+						return nil
+					}
+					return err
+				}
+			}
+			return nil
+		})
+	})
+
+	if ipldError != nil {
+		err = ipldError
+	}
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+
+	return md, n, nil
 }
 
 func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, error) {
@@ -661,27 +1102,33 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 	}
 
 	var md gateway.ContentPathMetadata
+	var ipldError error
 	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=block", func(resource string, reader io.Reader) error {
-		gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
-		if err != nil {
-			return err
-		}
-		r, _ := getIPFSPathResolverAndLsysFromBlockReader(ctx, gb)
+		return checkRetryableError(&ipldError, func() error {
+			gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
+			if err != nil {
+				return err
+			}
+			r, _ := getIPFSPathResolverAndLsysFromBlockReader(ctx, gb)
 
-		// First resolve the path since we always need to.
-		lastCid, remainder, err := r.ResolveToLastNode(ctx, ipfspath.FromString(path.String()))
-		if err != nil {
-			return err
-		}
+			// First resolve the path since we always need to.
+			lastCid, remainder, err := r.ResolveToLastNode(ctx, ipfspath.FromString(path.String()))
+			if err != nil {
+				return err
+			}
 
-		md = gateway.ContentPathMetadata{
-			PathSegmentRoots: []cid.Cid{rootCid},
-			LastSegment:      ifacepath.NewResolvedPath(ipfspath.FromString(path.String()), lastCid, rootCid, gopath.Join(remainder...)),
-		}
+			md = gateway.ContentPathMetadata{
+				PathSegmentRoots: []cid.Cid{rootCid},
+				LastSegment:      ifacepath.NewResolvedPath(ipfspath.FromString(path.String()), lastCid, rootCid, gopath.Join(remainder...)),
+			}
 
-		return nil
+			return nil
+		})
 	})
 
+	if ipldError != nil {
+		err = ipldError
+	}
 	if err != nil {
 		return gateway.ContentPathMetadata{}, err
 	}
@@ -695,51 +1142,86 @@ func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath,
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
+	p := ipfspath.FromString(path.String())
 
 	r, w := io.Pipe()
 	go func() {
-		cw, err := storage.NewWritable(w, []cid.Cid{cid.MustParse("bafkqaaa")}, carv2.WriteAsCarV1(true))
+		numBlocksSent := 0
+		var cw storage.WritableCar
+		var blockBuffer []blocks.Block
+		var ipldError error
+		err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=all", func(resource string, reader io.Reader) error {
+			return checkRetryableError(&ipldError, func() error {
+				numBlocksThisCall := 0
+				gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
+				if err != nil {
+					return err
+				}
+				teeBlock := func(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+					blk, err := gb(ctx, c)
+					if err != nil {
+						return nil, err
+					}
+					if numBlocksThisCall >= numBlocksSent {
+						if cw == nil {
+							blockBuffer = append(blockBuffer, blk)
+						} else {
+							err = cw.Put(ctx, blk.Cid().KeyString(), blk.RawData())
+							if err != nil {
+								return nil, fmt.Errorf("error writing car block: %w", err)
+							}
+						}
+						numBlocksSent++
+					}
+					numBlocksThisCall++
+					return blk, nil
+				}
+				r, l := getIPFSPathResolverAndLsysFromBlockReader(ctx, teeBlock)
+
+				// First resolve the path since we always need to.
+				lastCid, remainder, err := r.ResolveToLastNode(ctx, p)
+				if err != nil {
+					return err
+				}
+				if len(remainder) > 0 {
+					return nil
+				}
+
+				cw, err = storage.NewWritable(w, []cid.Cid{lastCid}, carv2.WriteAsCarV1(true))
+				if err != nil {
+					// io.PipeWriter.CloseWithError always returns nil.
+					_ = w.CloseWithError(err)
+					return nil
+				}
+				for _, blk := range blockBuffer {
+					err = cw.Put(ctx, blk.Cid().KeyString(), blk.RawData())
+					if err != nil {
+						_ = w.CloseWithError(fmt.Errorf("error writing car block: %w", err))
+						return nil
+					}
+				}
+				blockBuffer = nil
+
+				err = walkGatewaySimpleSelector(ctx, lastCid, params, l, r)
+				if err != nil {
+					return err
+				}
+				return nil
+			})
+		})
+
+		if ipldError != nil {
+			err = ipldError
+		}
 		if err != nil {
 			// io.PipeWriter.CloseWithError always returns nil.
 			_ = w.CloseWithError(err)
-			return
 		}
-		numBlocksSent := 0
-		err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=all&car-scope=all&depth=all", func(resource string, reader io.Reader) error {
-			numBlocksThisCall := 0
-			gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
-			if err != nil {
-				return err
-			}
-			teeBlock := func(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-				blk, err := gb(ctx, c)
-				if err != nil {
-					return nil, err
-				}
-				if numBlocksThisCall >= numBlocksSent {
-					err = cw.Put(ctx, blk.Cid().KeyString(), blk.RawData())
-					if err != nil {
-						return nil, fmt.Errorf("error writing car block: %w", err)
-					}
-					numBlocksSent++
-				}
-				numBlocksThisCall++
-				return blk, nil
-			}
-			r, l := getIPFSPathResolverAndLsysFromBlockReader(ctx, teeBlock)
-			err = walkGatewaySimpleSelector(ctx, ipfspath.FromString(path.String()), params, l, r)
-			if err != nil {
-				return err
-			}
-			return nil
-		})
-		// io.PipeWriter.CloseWithError always returns nil.
-		_ = w.CloseWithError(err)
 	}()
 
 	return gateway.ContentPathMetadata{
 		PathSegmentRoots: []cid.Cid{rootCid},
-		LastSegment:      nil,
+		LastSegment:      ifacepath.NewResolvedPath(p, rootCid, rootCid, ""),
 		ContentType:      "",
 	}, r, nil
 }
@@ -829,184 +1311,37 @@ func (api *GraphGateway) GetDNSLinkRecord(ctx context.Context, hostname string) 
 
 var _ gateway.IPFSBackend = (*GraphGateway)(nil)
 
-type inboundBlockExchange struct {
-	ps BlockPubSub
-}
-
-func newInboundBlockExchange() *inboundBlockExchange {
-	return &inboundBlockExchange{
-		ps: NewBlockPubSub(),
+func checkRetryableError(e *error, fn func() error) error {
+	err := fn()
+	if format.IsNotFound(err) {
+		return err
 	}
-}
+	initialErr := err
 
-func (i *inboundBlockExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	blk, more := <-i.ps.Subscribe(ctx, c.Hash())
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if !more {
-		return nil, format.ErrNotFound{Cid: c}
-	}
-	return blk, nil
-}
-
-func (i *inboundBlockExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
-	mhMap := make(map[string]struct{})
-	for _, c := range cids {
-		mhMap[string(c.Hash())] = struct{}{}
-	}
-	mhs := make([]multihash.Multihash, 0, len(mhMap))
-	for k := range mhMap {
-		mhs = append(mhs, multihash.Multihash(k))
-	}
-	return i.ps.Subscribe(ctx, mhs...), nil
-}
-
-func (i *inboundBlockExchange) NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error {
-	// TODO: handle context cancellation and/or blockage here
-	i.ps.Publish(blocks...)
-	return nil
-}
-
-func (i *inboundBlockExchange) Close() error {
-	i.ps.Shutdown()
-	return nil
-}
-
-var _ exchange.Interface = (*inboundBlockExchange)(nil)
-
-type handoffExchange struct {
-	startingExchange, followupExchange exchange.Interface
-	bstore                             blockstore.Blockstore
-	handoffCh                          <-chan struct{}
-	metrics                            *GraphGatewayMetrics
-}
-
-func (f *handoffExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	blkCh, err := f.startingExchange.GetBlocks(ctx, []cid.Cid{c})
-	if err != nil {
-		return nil, err
-	}
-	blk, ok := <-blkCh
-	if ok {
-		return blk, nil
-	}
-
-	select {
-	case <-f.handoffCh:
-		graphLog.Debugw("switching to backup block fetcher", "cid", c)
-		f.metrics.blockRecoveryAttemptMetric.Inc()
-		return f.followupExchange.GetBlock(ctx, c)
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-}
-
-func (f *handoffExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
-	blkCh, err := f.startingExchange.GetBlocks(ctx, cids)
-	if err != nil {
-		return nil, err
-	}
-
-	retCh := make(chan blocks.Block)
-
-	go func() {
-		cs := cid.NewSet()
-		for cs.Len() < len(cids) {
-			blk, ok := <-blkCh
-			if !ok {
-				break
-			}
-			select {
-			case retCh <- blk:
-				cs.Add(blk.Cid())
-			case <-ctx.Done():
-			}
+	// Checks if err is of a type that does not implement the .Is interface and
+	// cannot be directly compared to. Therefore, errors.Is cannot be used.
+	for {
+		_, ok := err.(resolver.ErrNoLink)
+		if ok {
+			*e = err
+			return nil
 		}
 
-		for cs.Len() < len(cids) {
-			select {
-			case <-ctx.Done():
-				return
-			case <-f.handoffCh:
-				var newCidArr []cid.Cid
-				for _, c := range cids {
-					if !cs.Has(c) {
-						blk, _ := f.bstore.Get(ctx, c)
-						if blk != nil {
-							select {
-							case retCh <- blk:
-								cs.Add(blk.Cid())
-							case <-ctx.Done():
-								return
-							}
-						} else {
-							newCidArr = append(newCidArr, c)
-						}
-					}
-				}
-
-				if len(newCidArr) == 0 {
-					return
-				}
-
-				graphLog.Debugw("needed to use use a backup fetcher for cids", "cids", newCidArr)
-				f.metrics.blockRecoveryAttemptMetric.Add(float64(len(newCidArr)))
-				fch, err := f.followupExchange.GetBlocks(ctx, newCidArr)
-				if err != nil {
-					graphLog.Errorw("error getting blocks from followupExchange", "error", err)
-					return
-				}
-				for cs.Len() < len(cids) {
-					blk, ok := <-fch
-					if !ok {
-						return
-					}
-					select {
-					case retCh <- blk:
-						cs.Add(blk.Cid())
-					case <-ctx.Done():
-						return
-					}
-				}
-			}
+		_, ok = err.(datamodel.ErrWrongKind)
+		if ok {
+			*e = err
+			return nil
 		}
-	}()
-	return retCh, nil
+
+		_, ok = err.(datamodel.ErrNotExists)
+		if ok {
+			*e = err
+			return nil
+		}
+
+		err = errors.Unwrap(err)
+		if err == nil {
+			return initialErr
+		}
+	}
 }
-
-func (f *handoffExchange) NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error {
-	err1 := f.startingExchange.NotifyNewBlocks(ctx, blocks...)
-	err2 := f.followupExchange.NotifyNewBlocks(ctx, blocks...)
-	return multierr.Combine(err1, err2)
-}
-
-func (f *handoffExchange) Close() error {
-	err1 := f.startingExchange.Close()
-	err2 := f.followupExchange.Close()
-	return multierr.Combine(err1, err2)
-}
-
-var _ exchange.Interface = (*handoffExchange)(nil)
-
-type blockFetcherExchWrapper struct {
-	f exchange.Fetcher
-}
-
-func (b *blockFetcherExchWrapper) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	return b.f.GetBlock(ctx, c)
-}
-
-func (b *blockFetcherExchWrapper) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
-	return b.f.GetBlocks(ctx, cids)
-}
-
-func (b *blockFetcherExchWrapper) NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error {
-	return nil
-}
-
-func (b *blockFetcherExchWrapper) Close() error {
-	return nil
-}
-
-var _ exchange.Interface = (*blockFetcherExchWrapper)(nil)
