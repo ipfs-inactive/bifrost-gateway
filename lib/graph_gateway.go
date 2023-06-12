@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	gopath "path"
 	"runtime"
 	"runtime/debug"
 	"strconv"
@@ -31,6 +32,8 @@ import (
 	"github.com/ipld/go-car"
 	carv2 "github.com/ipld/go-car/v2"
 	"github.com/ipld/go-car/v2/storage"
+	"github.com/ipld/go-ipld-prime"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
 	routinghelpers "github.com/libp2p/go-libp2p-routing-helpers"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
@@ -546,18 +549,49 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "block", "entityRanges": "0"}).Inc()
 	// TODO: if path is `/ipfs/cid`, we should use ?format=raw
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=block&car-scope=block&depth=0")
+	rootCid, err := getRootCid(path)
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
-	md, f, err := blkgw.GetBlock(ctx, path)
+	p := ipfspath.FromString(path.String())
+
+	var md gateway.ContentPathMetadata
+	var f files.File
+	// TODO: fallback to dynamic fetches in case we haven't requested enough data
+	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=block", func(resource string, reader io.Reader) error {
+		gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
+		if err != nil {
+			return err
+		}
+		r, lsys := getIPFSPathResolverAndLsysFromBlockReader(ctx, gb)
+
+		// First resolve the path since we always need to.
+		lastCid, remainder, err := r.ResolveToLastNode(ctx, p)
+		if err != nil {
+			return err
+		}
+
+		md = gateway.ContentPathMetadata{
+			PathSegmentRoots: []cid.Cid{rootCid},
+			LastSegment:      ifacepath.NewResolvedPath(p, lastCid, rootCid, gopath.Join(remainder...)),
+		}
+
+		lctx := ipld.LinkContext{Ctx: ctx}
+		pathTerminalCidLink := cidlink.Link{Cid: lastCid}
+
+		data, err := lsys.LoadRaw(lctx, pathTerminalCidLink)
+		if err != nil {
+			return err
+		}
+
+		f = files.NewBytesFile(data)
+		return nil
+	})
+
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
-	f, err = wrapNodeWithClose(f, closeFn)
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
+
 	return md, f, nil
 }
 
@@ -568,30 +602,91 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 	api.metrics.bytesRangeStartMetric.Observe(0)
 	api.metrics.bytesRangeSizeMetric.Observe(1024)
 
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=entity&entity-bytes=0:1023&car-scope=file&depth=1&bytes=0:1023")
+	rootCid, err := getRootCid(path)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
+	}
+	p := ipfspath.FromString(path.String())
+
+	var md gateway.ContentPathMetadata
+	var f files.File
+	// TODO: fallback to dynamic fetches in case we haven't requested enough data
+	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=entity&entity-bytes=0:3071", func(resource string, reader io.Reader) error {
+		gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
+		if err != nil {
+			return err
+		}
+		r, lsys := getIPFSPathResolverAndLsysFromBlockReader(ctx, gb)
+
+		// First resolve the path since we always need to.
+		lastCid, remainder, err := r.ResolveToLastNode(ctx, p)
+		if err != nil {
+			return err
+		}
+
+		md = gateway.ContentPathMetadata{
+			PathSegmentRoots: []cid.Cid{rootCid},
+			LastSegment:      ifacepath.NewResolvedPath(p, lastCid, rootCid, gopath.Join(remainder...)),
+		}
+
+		// It's not UnixFS if there is a remainder
+		if len(remainder) > 0 {
+			lctx := ipld.LinkContext{Ctx: ctx}
+			pathTerminalCidLink := cidlink.Link{Cid: lastCid}
+
+			data, err := lsys.LoadRaw(lctx, pathTerminalCidLink)
+			if err != nil {
+				return err
+			}
+
+			f = files.NewBytesFile(data)
+			return nil
+		}
+
+		return nil
+	})
 
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
 	}
-	md, f, err := blkgw.Head(ctx, path)
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	f, err = wrapNodeWithClose(f, closeFn)
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
+
 	return md, f, nil
 }
 
 func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "block", "entityRanges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=block&car-scope=block&depth=0")
+	rootCid, err := getRootCid(path)
 	if err != nil {
 		return gateway.ContentPathMetadata{}, err
 	}
-	defer closeFn()
-	return blkgw.ResolvePath(ctx, path)
+
+	var md gateway.ContentPathMetadata
+	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=block", func(resource string, reader io.Reader) error {
+		gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
+		if err != nil {
+			return err
+		}
+		r, _ := getIPFSPathResolverAndLsysFromBlockReader(ctx, gb)
+
+		// First resolve the path since we always need to.
+		lastCid, remainder, err := r.ResolveToLastNode(ctx, ipfspath.FromString(path.String()))
+		if err != nil {
+			return err
+		}
+
+		md = gateway.ContentPathMetadata{
+			PathSegmentRoots: []cid.Cid{rootCid},
+			LastSegment:      ifacepath.NewResolvedPath(ipfspath.FromString(path.String()), lastCid, rootCid, gopath.Join(remainder...)),
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return gateway.ContentPathMetadata{}, err
+	}
+
+	return md, nil
 }
 
 func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath, params gateway.CarParams) (gateway.ContentPathMetadata, io.ReadCloser, error) {
