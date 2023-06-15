@@ -27,6 +27,7 @@ import (
 	ipfspath "github.com/ipfs/boxo/path"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-datastore"
 	format "github.com/ipfs/go-ipld-format"
 	golog "github.com/ipfs/go-log/v2"
 	routinghelpers "github.com/libp2p/go-libp2p-routing-helpers"
@@ -276,36 +277,12 @@ Implementation iteration plan:
 */
 
 func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx context.Context, path string) (gateway.IPFSBackend, func(), error) {
-	bstore := api.bstore
-	carFetchingExch := newInboundBlockExchange()
-	doneWithFetcher := make(chan struct{}, 1)
-	exch := &handoffExchange{
-		startingExchange: carFetchingExch,
-		followupExchange: &blockFetcherExchWrapper{api.blockFetcher},
-		bstore:           bstore,
-		handoffCh:        doneWithFetcher,
-		metrics:          api.metrics,
+	empty := blockstore.NewBlockstore(datastore.NewNullDatastore())
+	bstore, err := blockstore.CachedBlockstore(ctx, empty, blockstore.DefaultCacheOpts())
+	if err != nil {
+		return nil, nil, err
 	}
-
-	notifierKey := api.getRootOfPath(path)
-	var notifier *notifiersForRootCid
-	for {
-		notifiers, _ := api.notifiers.LoadOrStore(notifierKey, &notifiersForRootCid{notifiers: []Notifier{}})
-		if n, ok := notifiers.(*notifiersForRootCid); ok {
-			n.lk.Lock()
-			// could have been deleted after our load. try again.
-			if n.deleted != 0 {
-				n.lk.Unlock()
-				continue
-			}
-			notifier = n
-			n.notifiers = append(n.notifiers, exch)
-			n.lk.Unlock()
-			break
-		} else {
-			return nil, nil, errors.New("failed to get notifier")
-		}
-	}
+	exch := newInboundBlockExchange()
 
 	go func(metrics *GraphGatewayMetrics) {
 		defer func() {
@@ -374,18 +351,15 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 						return err
 					}
 					metrics.carBlocksFetchedMetric.Inc()
-					api.notifyOngoingRequests(ctx, notifierKey, blkRead.block)
 				}
 			}
 		})
 		if err != nil {
 			graphLog.Infow("car Fetch failed", "path", path, "error", err)
 		}
-		if err := carFetchingExch.Close(); err != nil {
+		if err := exch.Close(); err != nil {
 			graphLog.Errorw("carFetchingExch.Close()", "error", err)
 		}
-		doneWithFetcher <- struct{}{}
-		close(doneWithFetcher)
 	}(api.metrics)
 
 	bserv := blockservice.New(bstore, exch)
@@ -394,20 +368,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 		return nil, nil, err
 	}
 
-	return blkgw, func() {
-		notifier.lk.Lock()
-		for i, e := range notifier.notifiers {
-			if e == exch {
-				notifier.notifiers = append(notifier.notifiers[0:i], notifier.notifiers[i+1:]...)
-				break
-			}
-		}
-		if len(notifier.notifiers) == 0 {
-			notifier.deleted = 1
-			api.notifiers.Delete(notifierKey)
-		}
-		notifier.lk.Unlock()
-	}, nil
+	return blkgw, func() {}, nil
 }
 
 func (api *GraphGateway) notifyOngoingRequests(ctx context.Context, key string, blks ...blocks.Block) {
