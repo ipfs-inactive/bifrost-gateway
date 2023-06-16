@@ -240,18 +240,6 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 	}
 }
 
-func (api *GraphGateway) getRootOfPath(path string) string {
-	pth, err := ipfspath.ParsePath(path)
-	if err != nil {
-		return path
-	}
-	if pth.IsJustAKey() {
-		return pth.Segments()[0]
-	} else {
-		return pth.Segments()[1]
-	}
-}
-
 /*
 Implementation iteration plan:
 
