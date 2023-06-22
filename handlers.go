@@ -149,14 +149,16 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 
 	gwHandler := gateway.NewHandler(gwConf, gwAPI)
 	ipfsHandler := withHTTPMetrics(gwHandler, "ipfs")
-	ipnsHandler := withHTTPMetrics(gwHandler, "ipns")
+	//ipnsHandler := withHTTPMetrics(gwHandler, "ipns")
+	ipnsHandler := gwHandler
 
 	mux := http.NewServeMux()
 	mux.Handle("/ipfs/", ipfsHandler)
 	mux.Handle("/ipns/", ipnsHandler)
 	// TODO: below is legacy which we want to remove, measuring this separately
 	// allows us to decide when is the time to do it.
-	legacyKuboRpcHandler := withHTTPMetrics(newKuboRPCHandler(kuboRPC), "legacyKuboRpc")
+	//legacyKuboRpcHandler := withHTTPMetrics(newKuboRPCHandler(kuboRPC), "legacyKuboRpc")
+	legacyKuboRpcHandler := newKuboRPCHandler(kuboRPC)
 	mux.Handle("/api/v0/", legacyKuboRpcHandler)
 
 	// Construct the HTTP handler for the gateway.
