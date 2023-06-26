@@ -3,6 +3,8 @@ package lib
 import (
 	"context"
 	"errors"
+	"sync/atomic"
+	"time"
 
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
@@ -46,12 +48,14 @@ func NewCacheBlockStore(size int) (blockstore.Blockstore, error) {
 		return nil, err
 	}
 
-	return &cacheBlockStore{
+	cbs := cacheBlockStore{
 		cache:               c,
 		rehash:              uatomic.NewBool(false),
 		cacheHitsMetric:     cacheHitsMetric,
 		cacheRequestsMetric: cacheRequestsMetric,
-	}, nil
+		putDeficit:          atomic.Int32{},
+	}
+	return &cbs, nil
 }
 
 type cacheBlockStore struct {
@@ -59,6 +63,8 @@ type cacheBlockStore struct {
 	rehash              *uatomic.Bool
 	cacheHitsMetric     prometheus.Counter
 	cacheRequestsMetric prometheus.Counter
+
+	putDeficit atomic.Int32
 }
 
 func (l *cacheBlockStore) DeleteBlock(ctx context.Context, c cid.Cid) error {
@@ -71,6 +77,7 @@ func (l *cacheBlockStore) Has(ctx context.Context, c cid.Cid) (bool, error) {
 }
 
 func (l *cacheBlockStore) Get(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+	l.putDeficit.Add(-1)
 	l.cacheRequestsMetric.Add(1)
 
 	blkData, found := l.cache.Get(string(c.Hash()))
@@ -111,6 +118,11 @@ func (l *cacheBlockStore) GetSize(ctx context.Context, c cid.Cid) (int, error) {
 }
 
 func (l *cacheBlockStore) Put(ctx context.Context, blk blocks.Block) error {
+	new := l.putDeficit.Add(1)
+	if new > 0 {
+		time.Sleep(time.Millisecond * time.Duration(new))
+	}
+
 	l.cache.Add(string(blk.Cid().Hash()), blk.RawData())
 	return nil
 }
