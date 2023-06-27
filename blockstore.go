@@ -70,7 +70,7 @@ func (e *exchangeBsWrapper) Close() error {
 // gatewayError translates underlying blockstore error into one that gateway code will return as HTTP 502 or 504
 // it also makes sure Retry-After hint from remote blockstore will be passed to HTTP client, if present.
 func gatewayError(err error) error {
-	if errors.Is(err, &gateway.ErrorResponse{}) ||
+	if errors.Is(err, &gateway.ErrorStatusCode{}) ||
 		errors.Is(err, &gateway.ErrorRetryAfter{}) {
 		// already correct error
 		return err

@@ -92,7 +92,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 		blockService := blockservice.New(cacheBlockStore, exch)
 
 		// Creates the gateway with the block service and the routing.
-		gwAPI, err = gateway.NewBlocksGateway(blockService, gateway.WithValueStore(routing))
+		gwAPI, err = gateway.NewBlocksBackend(blockService, gateway.WithValueStore(routing))
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +118,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 
 	// Note: in the future we may want to make this more configurable.
 	noDNSLink := false
-	publicGateways := map[string]*gateway.Specification{
+	publicGateways := map[string]*gateway.PublicGateway{
 		"localhost": {
 			Paths:                 []string{"/ipfs", "/ipns"},
 			NoDNSLink:             noDNSLink,
@@ -135,7 +135,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 
 	// If we're doing tests, ensure the right public gateways are enabled.
 	if os.Getenv("GATEWAY_CONFORMANCE_TEST") == "true" {
-		publicGateways["example.com"] = &gateway.Specification{
+		publicGateways["example.com"] = &gateway.PublicGateway{
 			Paths:                 []string{"/ipfs", "/ipns"},
 			NoDNSLink:             noDNSLink,
 			DeserializedResponses: true,
@@ -163,7 +163,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 
 	// Construct the HTTP handler for the gateway.
 	handler := withConnect(mux)
-	handler = http.Handler(gateway.WithHostname(gwConf, gwAPI, handler))
+	handler = http.Handler(gateway.NewHostnameHandler(gwConf, gwAPI, handler))
 	handler = servertiming.Middleware(handler, nil)
 
 	// Add logging.
