@@ -641,7 +641,7 @@ func (b *blockingExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Bloc
 		return blk, nil
 	}
 	blk, err := b.f.GetBlock(ctx, c)
-	if err != nil {
+	if err == nil && blk != nil {
 		b.bstore.Put(ctx, blk)
 	}
 	return blk, err
