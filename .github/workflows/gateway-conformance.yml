@@ -56,7 +56,7 @@ jobs:
           xml: output.xml
           html: output.html
           markdown: output.md
-          specs: -trustless-ipns-gateway,-path-ipns-gateway,-subdomain-ipns-gateway,-dnslink-gateway
+          specs: +trustless-gateway,-trustless-ipns-gateway,+path-gateway,-path-ipns-gateway,+subdomain-gateway,-subdomain-ipns-gateway,+dnslink-gateway
           args: -skip 'TestGatewayCar/GET_response_for_application/vnd.ipld.car/Header_Content-Length'
 
       # 7. Upload the results
