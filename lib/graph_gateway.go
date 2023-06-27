@@ -330,7 +330,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 					return blkRead.err
 				}
 				if blkRead.block != nil {
-					if err := bstore.Put(ctx, blkRead.block); err != nil {
+					if err := bstore.PutMany(ctx, []blocks.Block{blkRead.block}); err != nil {
 						return err
 					}
 					metrics.carBlocksFetchedMetric.Inc()
@@ -640,7 +640,11 @@ func (b *blockingExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Bloc
 	if blk, err := b.bstore.Get(ctx, c); err == nil {
 		return blk, nil
 	}
-	return b.f.GetBlock(ctx, c)
+	blk, err := b.f.GetBlock(ctx, c)
+	if err != nil {
+		b.bstore.Put(ctx, blk)
+	}
+	return blk, err
 }
 
 func (b *blockingExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {

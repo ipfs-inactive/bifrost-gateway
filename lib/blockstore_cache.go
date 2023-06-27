@@ -118,17 +118,17 @@ func (l *cacheBlockStore) GetSize(ctx context.Context, c cid.Cid) (int, error) {
 }
 
 func (l *cacheBlockStore) Put(ctx context.Context, blk blocks.Block) error {
-	new := l.putDeficit.Add(1)
-	if new > 0 {
-		time.Sleep(time.Millisecond * time.Duration(new))
-	}
-
 	l.cache.Add(string(blk.Cid().Hash()), blk.RawData())
 	return nil
 }
 
 func (l *cacheBlockStore) PutMany(ctx context.Context, blks []blocks.Block) error {
 	for _, b := range blks {
+		new := l.putDeficit.Add(1)
+		if new > 0 {
+			time.Sleep(time.Millisecond * time.Duration(new))
+		}
+
 		if err := l.Put(ctx, b); err != nil {
 			return err
 		}
