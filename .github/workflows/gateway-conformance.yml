@@ -18,7 +18,7 @@ jobs:
 
       # 2. Download the gateway-conformance fixtures
       - name: Download gateway-conformance fixtures
-        uses: ipfs/gateway-conformance/.github/actions/extract-fixtures@v0.0
+        uses: ipfs/gateway-conformance/.github/actions/extract-fixtures@v0.2
         with:
           output: fixtures
 
@@ -49,13 +49,14 @@ jobs:
 
       # 6. Run the gateway-conformance tests
       - name: Run gateway-conformance tests
-        uses: ipfs/gateway-conformance/.github/actions/test@v0.0
+        uses: ipfs/gateway-conformance/.github/actions/test@v0.2
         with:
           gateway-url: http://127.0.0.1:8081
           json: output.json
           xml: output.xml
           html: output.html
           markdown: output.md
+          specs: -trustless-ipns-gateway,-path-ipns-gateway,-subdomain-ipns-gateway,-dnslink-gateway
           args: -skip 'TestGatewayCar/GET_response_for_application/vnd.ipld.car/Header_Content-Length'
 
       # 7. Upload the results
