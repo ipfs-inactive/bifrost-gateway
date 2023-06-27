@@ -13,10 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/ipfs/boxo/ipns"
-	ipns_pb "github.com/ipfs/boxo/ipns/pb"
-	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -80,13 +77,12 @@ func (ps *proxyRouting) SearchValue(ctx context.Context, k string, opts ...routi
 }
 
 func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err error) {
-	key = strings.TrimPrefix(key, "/ipns/")
-	id, err := peer.IDFromBytes([]byte(key))
+	name, err := ipns.NameFromRoutingKey([]byte(key))
 	if err != nil {
 		return nil, err
 	}
 
-	key = "/ipns/" + peer.ToCid(id).String()
+	key = "/ipns/" + name.String()
 
 	urlStr := fmt.Sprintf("%s/api/v0/dht/get?arg=%s", ps.getRandomKuboURL(), key)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, nil)
@@ -142,13 +138,12 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err e
 		return nil, err
 	}
 
-	var entry ipns_pb.IpnsEntry
-	err = proto.Unmarshal(rb, &entry)
+	entry, err := ipns.UnmarshalRecord(rb)
 	if err != nil {
 		return nil, err
 	}
 
-	err = ipns.ValidateWithPeerID(id, &entry)
+	err = ipns.ValidateWithName(entry, name)
 	if err != nil {
 		return nil, err
 	}

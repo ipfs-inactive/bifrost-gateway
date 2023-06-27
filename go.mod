@@ -5,22 +5,21 @@ go 1.19
 require (
 	github.com/cskr/pubsub v1.0.2
 	github.com/filecoin-saturn/caboose v0.0.2
-	github.com/gogo/protobuf v1.3.2
 	github.com/hashicorp/golang-lru/v2 v2.0.1
-	github.com/ipfs/boxo v0.8.2-0.20230530204310-0dcbaccc3745
+	github.com/ipfs/boxo v0.10.2-0.20230627114119-8424cf4e020a
 	github.com/ipfs/go-block-format v0.1.2
-	github.com/ipfs/go-cid v0.4.0
-	github.com/ipfs/go-ipld-format v0.4.1-0.20230530195241-c3da01c74a06
+	github.com/ipfs/go-cid v0.4.1
+	github.com/ipfs/go-ipld-format v0.5.0
 	github.com/ipfs/go-log/v2 v2.5.1
-	github.com/ipfs/go-unixfsnode v1.6.0
+	github.com/ipfs/go-unixfsnode v1.7.1
 	github.com/ipld/go-codec-dagpb v1.6.0
 	github.com/ipld/go-ipld-prime v0.20.0
 	github.com/libp2p/go-libp2p v0.26.3
-	github.com/libp2p/go-libp2p-kad-dht v0.21.1
-	github.com/libp2p/go-libp2p-routing-helpers v0.4.0
+	github.com/libp2p/go-libp2p-kad-dht v0.23.0
+	github.com/libp2p/go-libp2p-routing-helpers v0.7.0
 	github.com/mitchellh/go-server-timing v1.0.1
-	github.com/multiformats/go-multicodec v0.8.1
-	github.com/multiformats/go-multihash v0.2.1
+	github.com/multiformats/go-multicodec v0.9.0
+	github.com/multiformats/go-multihash v0.2.3
 	github.com/prometheus/client_golang v1.15.1
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/spf13/cobra v1.6.1
@@ -58,6 +57,7 @@ require (
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/gddo v0.0.0-20180823221919-9d8ff1c67be5 // indirect
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
@@ -82,7 +82,6 @@ require (
 	github.com/ipfs/go-ipfs-util v0.0.2 // indirect
 	github.com/ipfs/go-ipld-cbor v0.0.6 // indirect
 	github.com/ipfs/go-ipld-legacy v0.2.1 // indirect
-	github.com/ipfs/go-ipns v0.3.0 // indirect
 	github.com/ipfs/go-libipfs v0.6.0 // indirect
 	github.com/ipfs/go-log v1.0.5 // indirect
 	github.com/ipfs/go-merkledag v0.10.1-0.20230601163447-eceea556e7d4 // indirect
@@ -120,7 +119,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.8.0 // indirect
 	github.com/multiformats/go-multiaddr-dns v0.3.1 // indirect
 	github.com/multiformats/go-multiaddr-fmt v0.1.0 // indirect
-	github.com/multiformats/go-multibase v0.1.1 // indirect
+	github.com/multiformats/go-multibase v0.2.0 // indirect
 	github.com/multiformats/go-multistream v0.4.1 // indirect
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/onsi/ginkgo/v2 v2.5.1 // indirect
@@ -177,6 +176,7 @@ require (
 	golang.org/x/text v0.7.0 // indirect
 	golang.org/x/tools v0.5.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
+	gonum.org/v1/gonum v0.11.0 // indirect
 	google.golang.org/genproto v0.0.0-20230110181048-76db0878b65f // indirect
 	google.golang.org/grpc v1.53.0 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect

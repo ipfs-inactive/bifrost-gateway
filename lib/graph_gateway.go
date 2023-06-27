@@ -337,7 +337,7 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 	}(api.metrics)
 
 	bserv := blockservice.New(bstore, exch)
-	blkgw, err := gateway.NewBlocksGateway(bserv)
+	blkgw, err := gateway.NewBlocksBackend(bserv)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -499,14 +499,14 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 	return blkgw.ResolvePath(ctx, path)
 }
 
-func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, io.ReadCloser, <-chan error, error) {
+func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath, params gateway.CarParams) (gateway.ContentPathMetadata, io.ReadCloser, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "all", "entityRanges": "0"}).Inc()
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=all")
 	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, nil, err
+		return gateway.ContentPathMetadata{}, nil, err
 	}
 	defer closeFn()
-	return blkgw.GetCAR(ctx, path)
+	return blkgw.GetCAR(ctx, path, params)
 }
 
 func (api *GraphGateway) IsCached(ctx context.Context, path ifacepath.Path) bool {
@@ -516,13 +516,13 @@ func (api *GraphGateway) IsCached(ctx context.Context, path ifacepath.Path) bool
 // TODO: This is copy-paste from blocks gateway, maybe share code
 func (api *GraphGateway) GetIPNSRecord(ctx context.Context, c cid.Cid) ([]byte, error) {
 	if api.routing == nil {
-		return nil, gateway.NewErrorResponse(errors.New("IPNS Record responses are not supported by this gateway"), http.StatusNotImplemented)
+		return nil, gateway.NewErrorStatusCode(errors.New("IPNS Record responses are not supported by this gateway"), http.StatusNotImplemented)
 	}
 
 	// Fails fast if the CID is not an encoded Libp2p Key, avoids wasteful
 	// round trips to the remote routing provider.
 	if multicodec.Code(c.Type()) != multicodec.Libp2pKey {
-		return nil, gateway.NewErrorResponse(errors.New("cid codec must be libp2p-key"), http.StatusBadRequest)
+		return nil, gateway.NewErrorStatusCode(errors.New("cid codec must be libp2p-key"), http.StatusBadRequest)
 	}
 
 	// The value store expects the key itself to be encoded as a multihash.
@@ -560,7 +560,7 @@ func (api *GraphGateway) ResolveMutable(ctx context.Context, p ifacepath.Path) (
 		}
 		return imPath, nil
 	default:
-		return gateway.ImmutablePath{}, gateway.NewErrorResponse(fmt.Errorf("unsupported path namespace: %s", p.Namespace()), http.StatusNotImplemented)
+		return gateway.ImmutablePath{}, gateway.NewErrorStatusCode(fmt.Errorf("unsupported path namespace: %s", p.Namespace()), http.StatusNotImplemented)
 	}
 }
 
@@ -574,7 +574,7 @@ func (api *GraphGateway) GetDNSLinkRecord(ctx context.Context, hostname string) 
 		return ifacepath.New(p.String()), err
 	}
 
-	return nil, gateway.NewErrorResponse(errors.New("not implemented"), http.StatusNotImplemented)
+	return nil, gateway.NewErrorStatusCode(errors.New("not implemented"), http.StatusNotImplemented)
 }
 
 var _ gateway.IPFSBackend = (*GraphGateway)(nil)
