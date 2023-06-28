@@ -242,10 +242,10 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 	}
 }
 
-var cacheLimiter = semaphore.NewWeighted(2048)
+var cacheLimiter = semaphore.NewWeighted(4096)
 var cachePool = sync.Pool{
 	New: func() any {
-		bs, _ := NewCacheBlockStore(512)
+		bs, _ := NewCacheBlockStore(384)
 		return bs
 	},
 }
