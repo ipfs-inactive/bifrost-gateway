@@ -43,7 +43,7 @@ RUN GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o $GOPATH/bin/bifrost-gateway
 
 
 #------------------------------------------------------
-FROM --platform=${BUILDPLATFORM:-linux/amd64} busybox:1-glibc
+FROM --platform=${BUILDPLATFORM:-linux/amd64} busybox:1.34.1-glibc
 MAINTAINER IPFS Stewards <w3dt-stewards-ip@protocol.ai>
 
 ENV GOPATH                 /go
