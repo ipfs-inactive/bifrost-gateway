@@ -8,22 +8,20 @@ import (
 	"github.com/ipfs/boxo/path/resolver"
 	"io"
 	"net/http"
+	"net/url"
 	gopath "path"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/filecoin-saturn/caboose"
-	"github.com/ipfs/boxo/blockservice"
 	blockstore "github.com/ipfs/boxo/blockstore"
 	nsopts "github.com/ipfs/boxo/coreiface/options/namesys"
 	ifacepath "github.com/ipfs/boxo/coreiface/path"
 	exchange "github.com/ipfs/boxo/exchange"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/gateway"
-	"github.com/ipfs/boxo/ipld/car"
 	carv2 "github.com/ipfs/boxo/ipld/car/v2"
 	"github.com/ipfs/boxo/ipld/car/v2/storage"
 	"github.com/ipfs/boxo/ipld/merkledag"
@@ -277,169 +275,6 @@ func (api *GraphGateway) getRootOfPath(path string) string {
 	}
 }
 
-/*
-Implementation iteration plan:
-
-1. Fetch CAR into per-request memory blockstore and serve response
-2. Fetch CAR into shared memory blockstore and serve response along with a blockservice that does block requests for missing data
-3. Start doing the walk locally and then if a path segment is incomplete send a request for blocks and upon every received block try to continue
-4. Start doing the walk locally and keep a list of "plausible" blocks, if after issuing a request we get a non-plausible block then report them and attempt to recover by redoing the last segment
-5. Don't redo the last segment fully if it's part of a UnixFS file and we can do range requests
-*/
-
-func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx context.Context, path string) (gateway.IPFSBackend, func(), error) {
-	bstore := api.bstore
-	carFetchingExch := newInboundBlockExchange()
-	doneWithFetcher := make(chan struct{}, 1)
-	exch := &handoffExchange{
-		startingExchange: carFetchingExch,
-		followupExchange: &blockFetcherExchWrapper{api.blockFetcher},
-		bstore:           bstore,
-		handoffCh:        doneWithFetcher,
-		metrics:          api.metrics,
-	}
-
-	notifierKey := api.getRootOfPath(path)
-	var notifier *notifiersForRootCid
-	for {
-		notifiers, _ := api.notifiers.LoadOrStore(notifierKey, &notifiersForRootCid{notifiers: []Notifier{}})
-		if n, ok := notifiers.(*notifiersForRootCid); ok {
-			n.lk.Lock()
-			// could have been deleted after our load. try again.
-			if n.deleted != 0 {
-				n.lk.Unlock()
-				continue
-			}
-			notifier = n
-			n.notifiers = append(n.notifiers, exch)
-			n.lk.Unlock()
-			break
-		} else {
-			return nil, nil, errors.New("failed to get notifier")
-		}
-	}
-
-	go func(metrics *GraphGatewayMetrics) {
-		defer func() {
-			if r := recover(); r != nil {
-				// TODO: move to Debugw?
-				graphLog.Errorw("Recovered fetcher error", "path", path, "error", r, "stacktrace", string(debug.Stack()))
-			}
-		}()
-		metrics.carFetchAttemptMetric.Inc()
-
-		if ce := ctx.Err(); ce != nil && errors.Is(ce, context.Canceled) {
-			metrics.contextAlreadyCancelledMetric.Inc()
-		}
-
-		cctx, cncl := context.WithCancel(ctx)
-		defer cncl()
-		err := api.fetcher.Fetch(cctx, path, func(resource string, reader io.Reader) error {
-			cr, err := car.NewCarReader(reader)
-			if err != nil {
-				return err
-			}
-
-			cbCtx, cncl := context.WithCancel(cctx)
-			defer cncl()
-
-			type blockRead struct {
-				block blocks.Block
-				err   error
-			}
-
-			blkCh := make(chan blockRead, 1)
-			go func() {
-				defer close(blkCh)
-				for {
-					blk, rdErr := cr.Next()
-					select {
-					case blkCh <- blockRead{blk, rdErr}:
-					case <-cbCtx.Done():
-						return
-					}
-				}
-			}()
-
-			// initially set a higher timeout here so that if there's an initial timeout error we get it from the car reader.
-			t := time.NewTimer(GetBlockTimeout * 2)
-			for {
-				var blkRead blockRead
-				var ok bool
-				select {
-				case blkRead, ok = <-blkCh:
-					if !t.Stop() {
-						<-t.C
-					}
-					t.Reset(GetBlockTimeout)
-				case <-t.C:
-					return gateway.ErrGatewayTimeout
-				}
-				if !ok || blkRead.err != nil {
-					if errors.Is(blkRead.err, io.EOF) {
-						return nil
-					}
-					return blkRead.err
-				}
-				if blkRead.block != nil {
-					if err := bstore.Put(ctx, blkRead.block); err != nil {
-						return err
-					}
-					metrics.carBlocksFetchedMetric.Inc()
-					api.notifyOngoingRequests(ctx, notifierKey, blkRead.block)
-				}
-			}
-		})
-		if err != nil {
-			graphLog.Infow("car Fetch failed", "path", path, "error", err)
-		}
-		if err := carFetchingExch.Close(); err != nil {
-			graphLog.Errorw("carFetchingExch.Close()", "error", err)
-		}
-		doneWithFetcher <- struct{}{}
-		close(doneWithFetcher)
-	}(api.metrics)
-
-	bserv := blockservice.New(bstore, exch)
-	blkgw, err := gateway.NewBlocksBackend(bserv)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return blkgw, func() {
-		notifier.lk.Lock()
-		for i, e := range notifier.notifiers {
-			if e == exch {
-				notifier.notifiers = append(notifier.notifiers[0:i], notifier.notifiers[i+1:]...)
-				break
-			}
-		}
-		if len(notifier.notifiers) == 0 {
-			notifier.deleted = 1
-			api.notifiers.Delete(notifierKey)
-		}
-		notifier.lk.Unlock()
-	}, nil
-}
-
-func (api *GraphGateway) notifyOngoingRequests(ctx context.Context, key string, blks ...blocks.Block) {
-	if notifiers, ok := api.notifiers.Load(key); ok {
-		notifier, ok := notifiers.(*notifiersForRootCid)
-		if !ok {
-			graphLog.Errorw("notifyOngoingRequests failed", "key", key, "error", "could not get notifiersForRootCid")
-			return
-		}
-		notifier.lk.RLock()
-		for _, n := range notifier.notifiers {
-			err := n.NotifyNewBlocks(ctx, blks...)
-			if err != nil {
-				graphLog.Errorw("notifyOngoingRequests failed", "key", key, "error", err)
-			}
-		}
-		notifier.lk.RUnlock()
-	}
-}
-
 type fileCloseWrapper struct {
 	files.File
 	closeFn func()
@@ -479,38 +314,49 @@ func wrapNodeWithClose[T files.Node](node T, closeFn func()) (T, error) {
 	}
 }
 
+func (api *GraphGateway) fetchCAR(ctx context.Context, path gateway.ImmutablePath, params gateway.CarParams, cb DataCallback) error {
+	escapedPath := url.PathEscape(path.String()[1:])
+	paramsBuilder := strings.Builder{}
+	paramsBuilder.WriteString("dag-scope=")
+	paramsBuilder.WriteString(string(params.Scope))
+	if params.Range != nil {
+		paramsBuilder.WriteString("&entity-bytes=")
+		paramsBuilder.WriteString(strconv.FormatInt(params.Range.From, 10))
+		paramsBuilder.WriteString(":")
+		if params.Range.To != nil {
+			paramsBuilder.WriteString(strconv.FormatInt(*params.Range.To, 10))
+		} else {
+			paramsBuilder.WriteString("*")
+		}
+	}
+	urlWithoutHost := fmt.Sprintf("/%s?%s", escapedPath, paramsBuilder.String())
+	return api.fetcher.Fetch(ctx, urlWithoutHost, cb)
+}
+
 func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, byteRanges ...gateway.ByteRange) (gateway.ContentPathMetadata, *gateway.GetResponse, error) {
 	rangeCount := len(byteRanges)
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "entity", "entityRanges": strconv.Itoa(rangeCount)}).Inc()
 
-	// TODO: remove &bytes= &depth= and &car-scope from all CAR request after transition is done:
-	// https://github.com/ipfs/bifrost-gateway/issues/80
-	carParams := "?format=car&dag-scope=entity"
+	carParams := gateway.CarParams{Scope: gateway.DagScopeEntity}
 
 	// fetch CAR with &bytes= to get minimal set of blocks for the request
 	// Note: majority of requests have 0 or max 1 ranges. if there are more ranges than one,
 	// that is a niche edge cache we don't prefetch as CAR and use fallback blockstore instead.
 	if rangeCount > 0 {
-		bytesBuilder := strings.Builder{}
-		bytesBuilder.WriteString("&entity-bytes=")
 		r := byteRanges[0]
-
-		bytesBuilder.WriteString(strconv.FormatUint(r.From, 10))
-		bytesBuilder.WriteString(":")
+		carParams.Range = &gateway.DagByteRange{
+			From: int64(r.From),
+		}
 
 		// TODO: move to boxo or to loadRequestIntoSharedBlockstoreAndBlocksGateway after we pass params in a humane way
 		api.metrics.bytesRangeStartMetric.Observe(float64(r.From))
 
 		if r.To != nil {
-			bytesBuilder.WriteString(strconv.FormatInt(*r.To, 10))
+			carParams.Range.To = r.To
 
 			// TODO: move to boxo or to loadRequestIntoSharedBlockstoreAndBlocksGateway after we pass params in a humane way
 			api.metrics.bytesRangeSizeMetric.Observe(float64(*r.To) - float64(r.From) + 1)
-		} else {
-			bytesBuilder.WriteString("*")
 		}
-
-		carParams += bytesBuilder.String()
 	}
 
 	rootCid, err := getRootCid(path)
@@ -531,10 +377,11 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 	var terminalFile *multiReadCloser
 	var terminalDir chan unixfs.LinkResult
 	lastDirLinkNum := 0
+	hasSentAsyncData := false
 	go func() {
 		cctx, cancel := context.WithCancel(ctx)
 		defer cancel()
-		err = api.fetcher.Fetch(cctx, path.String()+"?format=car&dag-scope=all", func(resource string, reader io.Reader) error {
+		err = api.fetchCAR(cctx, path, carParams, func(resource string, reader io.Reader) error {
 			gb, err := carToLinearBlockGetter(cctx, reader, api.metrics)
 			if err != nil {
 				return err
@@ -576,15 +423,19 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 
 			if pbn, ok := lastCidNode.(dagpb.PBNode); !ok {
 				// If it's not valid dag-pb then we're done
+				terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromReader(files.NewBytesFile(nodeBytes), int64(len(nodeBytes))), lastCid: lastCid}
 				return nil
 			} else if len(remainder) > 0 {
 				// If we're trying to path into dag-pb node that's invalid and we're done
+				terminalPathElementCh <- terminalPathType{err: fmt.Errorf("cannot path into non-UnixFS dagpb")}
 				return nil
 			} else if !pbn.FieldData().Exists() {
 				// If it's not valid UnixFS then we're done
+				terminalPathElementCh <- terminalPathType{err: fmt.Errorf("not valid UnixFS")}
 				return nil
 			} else if unixfsFieldData, decodeErr := ufsData.DecodeUnixFSData(pbn.Data.Must().Bytes()); decodeErr != nil {
 				// If it's not valid dag-pb and UnixFS then we're done
+				terminalPathElementCh <- terminalPathType{err: fmt.Errorf("not valid UnixFS")}
 				return nil
 			} else {
 				switch fieldNum := unixfsFieldData.FieldDataType().Int(); fieldNum {
@@ -629,12 +480,10 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 						return nil
 					}
 
-					lnks := make(chan unixfs.LinkResult)
-					defer close(lnks)
 					if terminalDir == nil {
-						terminalDir = lnks
+						terminalDir = make(chan unixfs.LinkResult)
+						terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromDirectoryListing(sz, terminalDir, nil)}
 					}
-					terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromDirectoryListing(sz, lnks, nil)}
 
 					dirLinkNum := 0
 					switch fieldNum {
@@ -663,7 +512,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 							}
 
 							select {
-							case lnks <- lnk:
+							case terminalDir <- lnk:
 								lastDirLinkNum++
 							case <-cctx.Done():
 								// TODO: what here, send an error with another select?
@@ -671,11 +520,12 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 							}
 						}
 					case ufsData.Data_HAMTShard:
+						hasSentAsyncData = true
 						// Note: we are making up the entries
 						dirNd, err := unixfsnode.Reify(lctx, pbn, lsys)
 						if err != nil {
 							select {
-							case lnks <- unixfs.LinkResult{Err: fmt.Errorf("could not reify sharded directory: %w", err)}:
+							case terminalDir <- unixfs.LinkResult{Err: fmt.Errorf("could not reify sharded directory: %w", err)}:
 							case <-cctx.Done():
 								// TODO: what here?
 							}
@@ -691,7 +541,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 							keyStr, err := k.AsString()
 							if err != nil {
 								select {
-								case lnks <- unixfs.LinkResult{Err: fmt.Errorf("could not interpret directory key as string: %w", err)}:
+								case terminalDir <- unixfs.LinkResult{Err: fmt.Errorf("could not interpret directory key as string: %w", err)}:
 								case <-cctx.Done():
 									// TODO: what here?
 								}
@@ -700,7 +550,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 							valLink, err := v.AsLink()
 							if err != nil {
 								select {
-								case lnks <- unixfs.LinkResult{Err: fmt.Errorf("could not interpret directory value as link: %w", err)}:
+								case terminalDir <- unixfs.LinkResult{Err: fmt.Errorf("could not interpret directory value as link: %w", err)}:
 								case <-cctx.Done():
 									// TODO: what here?
 								}
@@ -719,7 +569,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 							}
 
 							select {
-							case lnks <- lnk:
+							case terminalDir <- lnk:
 								lastDirLinkNum++
 							case <-cctx.Done():
 								// TODO: what here?
@@ -764,6 +614,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 						}
 						terminalFile = mrc
 						terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromReader(files.NewReaderFile(mrc), fileSize), lastCid: lastCid}
+						hasSentAsyncData = true
 					} else {
 						select {
 						case terminalFile.newReader <- f:
@@ -773,9 +624,11 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 						}
 					}
 
-					_, err = io.Copy(io.Discard, terminalFile)
-					if err != nil {
-						return err
+					select {
+					case <-terminalFile.closed:
+						return nil
+					case <-cctx.Done():
+						// TODO: what here?
 					}
 					return nil
 				default:
@@ -784,6 +637,22 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 				}
 			}
 		})
+		if err != nil {
+			if !hasSentAsyncData {
+				terminalPathElementCh <- terminalPathType{err: fmt.Errorf("failed fetch: %w", err)}
+			} else if terminalFile != nil {
+				// TODO: this error should surface through the io.Reader
+			} else if terminalDir != nil {
+				select {
+				case terminalDir <- unixfs.LinkResult{Err: err}:
+				case <-cctx.Done():
+					// TODO: what here?
+				}
+			}
+		}
+		if terminalDir != nil {
+			close(terminalDir)
+		}
 	}()
 
 	select {
@@ -855,20 +724,7 @@ func (r *multiReadCloser) Close() error {
 var _ io.ReadCloser = (*multiReadCloser)(nil)
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "all", "entityRanges": "0"}).Inc()
-	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=all")
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	md, f, err := blkgw.GetAll(ctx, path)
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	f, err = wrapNodeWithClose(f, closeFn)
-	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	return md, f, nil
+	panic("not implemented")
 }
 
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
@@ -884,7 +740,7 @@ func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePat
 	var f files.File
 	var ipldError error
 	// TODO: fallback to dynamic fetches in case we haven't requested enough data
-	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=block", func(resource string, reader io.Reader) error {
+	err = api.fetchCAR(ctx, path, gateway.CarParams{Scope: gateway.DagScopeBlock}, func(resource string, reader io.Reader) error {
 		return checkRetryableError(&ipldError, func() error {
 			gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
 			if err != nil {
@@ -943,7 +799,8 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 	var n *gateway.HeadResponse
 	var ipldError error
 	// TODO: fallback to dynamic fetches in case we haven't requested enough data
-	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=entity&entity-bytes=0:3071", func(resource string, reader io.Reader) error {
+	rangeTo := int64(3071)
+	err = api.fetchCAR(ctx, path, gateway.CarParams{Scope: gateway.DagScopeEntity, Range: &gateway.DagByteRange{From: 0, To: &rangeTo}}, func(resource string, reader io.Reader) error {
 		return checkRetryableError(&ipldError, func() error {
 			gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
 			if err != nil {
@@ -1102,7 +959,7 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 
 	var md gateway.ContentPathMetadata
 	var ipldError error
-	err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=block", func(resource string, reader io.Reader) error {
+	err = api.fetchCAR(ctx, path, gateway.CarParams{Scope: gateway.DagScopeBlock}, func(resource string, reader io.Reader) error {
 		return checkRetryableError(&ipldError, func() error {
 			gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
 			if err != nil {
@@ -1149,7 +1006,7 @@ func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath,
 		var cw storage.WritableCar
 		var blockBuffer []blocks.Block
 		var ipldError error
-		err = api.fetcher.Fetch(ctx, path.String()+"?format=car&dag-scope=all", func(resource string, reader io.Reader) error {
+		err = api.fetchCAR(ctx, path, gateway.CarParams{Scope: gateway.DagScopeAll}, func(resource string, reader io.Reader) error {
 			return checkRetryableError(&ipldError, func() error {
 				numBlocksThisCall := 0
 				gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
