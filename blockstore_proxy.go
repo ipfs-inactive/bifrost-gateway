@@ -50,7 +50,13 @@ func (ps *proxyBlockStore) Fetch(ctx context.Context, path string, cb lib.DataCa
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("http error from car gateway: %s", resp.Status)
+		errData, err := io.ReadAll(resp.Body)
+		if err != nil {
+			err = fmt.Errorf("could not read error message: %w", err)
+		} else {
+			err = fmt.Errorf("%q", string(errData))
+		}
+		return fmt.Errorf("http error from car gateway: %s: %w", resp.Status, err)
 	}
 
 	err = cb(path, resp.Body)

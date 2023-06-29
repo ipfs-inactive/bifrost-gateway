@@ -6,7 +6,7 @@ require (
 	github.com/cskr/pubsub v1.0.2
 	github.com/filecoin-saturn/caboose v0.0.3
 	github.com/hashicorp/golang-lru/v2 v2.0.1
-	github.com/ipfs/boxo v0.11.0
+	github.com/ipfs/boxo v0.11.1-0.20230803093408-3b83506a2ea5
 	github.com/ipfs/go-block-format v0.1.2
 	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/go-datastore v0.6.0
