@@ -1076,7 +1076,11 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 }
 
 func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath, params gateway.CarParams) (gateway.ContentPathMetadata, io.ReadCloser, error) {
-	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": string(params.Scope), "entityRanges": "0"}).Inc()
+	numRanges := "0"
+	if params.Range != nil {
+		numRanges = "1"
+	}
+	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": string(params.Scope), "entityRanges": numRanges}).Inc()
 	rootCid, err := getRootCid(path)
 	if err != nil {
 		return gateway.ContentPathMetadata{}, nil, err
@@ -1088,7 +1092,7 @@ func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath,
 		numBlocksSent := 0
 		var cw storage.WritableCar
 		var blockBuffer []blocks.Block
-		err = api.fetchCAR(ctx, path, gateway.CarParams{Scope: params.Scope}, func(resource string, reader io.Reader) error {
+		err = api.fetchCAR(ctx, path, params, func(resource string, reader io.Reader) error {
 			numBlocksThisCall := 0
 			gb, err := carToLinearBlockGetter(ctx, reader, api.metrics)
 			if err != nil {
