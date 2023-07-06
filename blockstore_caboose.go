@@ -44,6 +44,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 	saturnOrchestratorClient := &http.Client{
 		Timeout: caboose.DefaultSaturnOrchestratorRequestTimeout,
 		Transport: &customTransport{
+			AuthorizationBearerToken: os.Getenv(EnvSaturnLoggerSecret),
 			RoundTripper: &http.Transport{
 				DialContext:       cdns.dialWithCachedDNS,
 				ForceAttemptHTTP2: true,
