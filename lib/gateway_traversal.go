@@ -11,15 +11,11 @@ import (
 
 	"github.com/ipld/go-ipld-prime/linking"
 
-	"github.com/ipfs/boxo/blockservice"
-	"github.com/ipfs/boxo/blockstore"
 	"github.com/ipfs/boxo/exchange"
 	bsfetcher "github.com/ipfs/boxo/fetcher/impl/blockservice"
 	"github.com/ipfs/boxo/gateway"
-	"github.com/ipfs/boxo/path/resolver"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
-	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-unixfsnode"
 	"github.com/ipfs/go-unixfsnode/data"
 	"github.com/ipld/go-car"
@@ -137,17 +133,7 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 	}, nil
 }
 
-func getIPFSPathResolverAndLsysFromBlockReader(ctx context.Context, fn getBlock) (resolver.Resolver, *ipld.LinkSystem) {
-	fetcher := bsfetcher.NewFetcherConfig(
-		blockservice.New(blockstore.NewBlockstore(&datastore.NullDatastore{}), &blockFetcherExchWrapper{f: &gbf{fn}}))
-	fetcher.NodeReifier = unixfsnode.Reify
-	fetcher.PrototypeChooser = dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
-		if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
-			return tlnkNd.LinkTargetNodePrototype(), nil
-		}
-		return basicnode.Prototype.Any, nil
-	})
-	res := resolver.NewBasicResolver(fetcher)
+func getLinksystem(fn getBlock) *ipld.LinkSystem {
 	lsys := cidlink.DefaultLinkSystem()
 	lsys.StorageReadOpener = func(linkContext linking.LinkContext, link datamodel.Link) (io.Reader, error) {
 		c := link.(cidlink.Link).Cid
@@ -159,28 +145,50 @@ func getIPFSPathResolverAndLsysFromBlockReader(ctx context.Context, fn getBlock)
 	}
 	lsys.TrustedStorage = true
 	unixfsnode.AddUnixFSReificationToLinkSystem(&lsys)
-	return res, &lsys
+	return &lsys
 }
 
 // walkGatewaySimpleSelector walks the subgraph described by the path and terminal element parameters
-func walkGatewaySimpleSelector(ctx context.Context, lastCid cid.Cid, params gateway.CarParams, lsys *ipld.LinkSystem, pathResolver resolver.Resolver) error {
+func walkGatewaySimpleSelector(ctx context.Context, terminalBlk blocks.Block, params gateway.CarParams, lsys *ipld.LinkSystem) error {
 	lctx := ipld.LinkContext{Ctx: ctx}
-	pathTerminalCidLink := cidlink.Link{Cid: lastCid}
 	var err error
 
-	// If the scope is the block, now we only need to retrieve the root block of the last element of the path.
+	// If the scope is the block, we only need the root block of the last element of the path, which we have.
 	if params.Scope == gateway.DagScopeBlock {
-		_, err = lsys.LoadRaw(lctx, pathTerminalCidLink)
+		return nil
+	}
+
+	// decode the terminal block into a node
+	pc := dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
+		if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
+			return tlnkNd.LinkTargetNodePrototype(), nil
+		}
+		return basicnode.Prototype.Any, nil
+	})
+
+	pathTerminalCidLink := cidlink.Link{Cid: terminalBlk.Cid()}
+	np, err := pc(pathTerminalCidLink, lctx)
+	if err != nil {
 		return err
 	}
 
+	decoder, err := lsys.DecoderChooser(pathTerminalCidLink)
+	if err != nil {
+		return err
+	}
+	nb := np.NewBuilder()
+	blockData := terminalBlk.RawData()
+	if err := decoder(nb, bytes.NewReader(blockData)); err != nil {
+		return err
+	}
+	lastCidNode := nb.Build()
+
+	// TODO: Evaluate:
+	// Does it matter that we're ignoring the "remainder" portion of the traversal in GetCAR?
+	// Does it matter that we're using a linksystem with the UnixFS reifier for dagscope=all?
+
 	// If we're asking for everything then give it
 	if params.Scope == gateway.DagScopeAll {
-		lastCidNode, err := lsys.Load(lctx, pathTerminalCidLink, basicnode.Prototype.Any)
-		if err != nil {
-			return err
-		}
-
 		sel, err := selector.ParseSelector(selectorparse.CommonSelector_ExploreAllRecursively)
 		if err != nil {
 			return err
@@ -206,23 +214,6 @@ func walkGatewaySimpleSelector(ctx context.Context, lastCid cid.Cid, params gate
 	// From now on, dag-scope=entity!
 	// Since we need more of the graph load it to figure out what we have
 	// This includes determining if the terminal node is UnixFS or not
-	pc := dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
-		if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
-			return tlnkNd.LinkTargetNodePrototype(), nil
-		}
-		return basicnode.Prototype.Any, nil
-	})
-
-	np, err := pc(pathTerminalCidLink, lctx)
-	if err != nil {
-		return err
-	}
-
-	lastCidNode, err := lsys.Load(lctx, pathTerminalCidLink, np)
-	if err != nil {
-		return err
-	}
-
 	if pbn, ok := lastCidNode.(dagpb.PBNode); !ok {
 		// If it's not valid dag-pb then we're done
 		return nil
