@@ -33,7 +33,6 @@ import (
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
-	golog "github.com/ipfs/go-log/v2"
 	"github.com/ipfs/go-unixfsnode"
 	ufsData "github.com/ipfs/go-unixfsnode/data"
 	dagpb "github.com/ipld/go-codec-dagpb"
@@ -48,8 +47,6 @@ import (
 	"github.com/multiformats/go-multicodec"
 	"github.com/prometheus/client_golang/prometheus"
 )
-
-var graphLog = golog.Logger("backend/graph")
 
 const GetBlockTimeout = time.Second * 60
 
@@ -93,18 +90,6 @@ func WithBlockstore(bs blockstore.Blockstore) GraphGatewayOption {
 }
 
 type GraphGatewayOption func(gwOptions *gwOptions) error
-
-type Notifier interface {
-	NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error
-}
-
-// notifiersForRootCid is used for reducing lock contention by only notifying
-// exchanges related to the same content root CID
-type notifiersForRootCid struct {
-	lk        sync.RWMutex
-	deleted   int8
-	notifiers []Notifier
-}
 
 type GraphGateway struct {
 	fetcher      CarFetcher
@@ -269,57 +254,6 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 		carParamsMetric,
 		bytesRangeStartMetric,
 		bytesRangeSizeMetric,
-	}
-}
-
-func (api *GraphGateway) getRootOfPath(path string) string {
-	pth, err := ipfspath.ParsePath(path)
-	if err != nil {
-		return path
-	}
-	if pth.IsJustAKey() {
-		return pth.Segments()[0]
-	} else {
-		return pth.Segments()[1]
-	}
-}
-
-type fileCloseWrapper struct {
-	files.File
-	closeFn func()
-}
-
-func (w *fileCloseWrapper) Close() error {
-	w.closeFn()
-	return w.File.Close()
-}
-
-type dirCloseWrapper struct {
-	files.Directory
-	closeFn func()
-}
-
-func (w *dirCloseWrapper) Close() error {
-	w.closeFn()
-	return w.Directory.Close()
-}
-
-func wrapNodeWithClose[T files.Node](node T, closeFn func()) (T, error) {
-	var genericNode files.Node = node
-	switch n := genericNode.(type) {
-	case *files.Symlink:
-		closeFn()
-		return node, nil
-	case files.File:
-		var f files.File = &fileCloseWrapper{n, closeFn}
-		return f.(T), nil
-	case files.Directory:
-		var d files.Directory = &dirCloseWrapper{n, closeFn}
-		return d.(T), nil
-	default:
-		closeFn()
-		var zeroType T
-		return zeroType, fmt.Errorf("unsupported node type")
 	}
 }
 
