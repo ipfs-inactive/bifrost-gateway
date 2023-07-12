@@ -44,6 +44,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 	saturnOrchestratorClient := &http.Client{
 		Timeout: caboose.DefaultSaturnOrchestratorRequestTimeout,
 		Transport: &customTransport{
+			AuthorizationBearerToken: os.Getenv(EnvSaturnLoggerSecret),
 			RoundTripper: &http.Transport{
 				DialContext:       cdns.dialWithCachedDNS,
 				ForceAttemptHTTP2: true,
@@ -102,5 +103,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		DoValidation: true,
 		PoolRefresh:  caboose.DefaultPoolRefreshInterval,
 		SaturnClient: saturnRetrievalClient,
+
+		ComplianceCidPeriod: int64(100),
 	})
 }
