@@ -1,0 +1,526 @@
+package lib
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"github.com/ipfs/boxo/files"
+	"github.com/ipfs/boxo/gateway"
+	blocks "github.com/ipfs/go-block-format"
+	"github.com/ipfs/go-cid"
+	"github.com/ipfs/go-unixfsnode"
+	ufsData "github.com/ipfs/go-unixfsnode/data"
+	"github.com/ipfs/go-unixfsnode/hamt"
+	dagpb "github.com/ipld/go-codec-dagpb"
+	"github.com/ipld/go-ipld-prime"
+	"github.com/ipld/go-ipld-prime/datamodel"
+	cidlink "github.com/ipld/go-ipld-prime/linking/cid"
+	"github.com/ipld/go-ipld-prime/node/basicnode"
+	"github.com/ipld/go-ipld-prime/schema"
+	"github.com/multiformats/go-multicodec"
+	"io"
+)
+
+type AwaitCloser interface {
+	AwaitClose() <-chan error
+}
+
+type backpressuredFile struct {
+	size    int64
+	f       io.ReadSeeker
+	getLsys lsysGetter
+
+	ctx       context.Context
+	fileCid   cid.Cid
+	byteRange gateway.DagByteRange
+	retErr    error
+
+	closed chan error
+}
+
+func (b *backpressuredFile) AwaitClose() <-chan error {
+	return b.closed
+}
+
+func (b *backpressuredFile) Close() error {
+	close(b.closed)
+	return nil
+}
+
+func (b *backpressuredFile) Size() (int64, error) {
+	return b.size, nil
+}
+
+func (b *backpressuredFile) Read(p []byte) (n int, err error) {
+	if b.retErr == nil {
+		n, err = b.f.Read(p)
+		if err == nil || err == io.EOF {
+			return n, err
+		}
+
+		if n > 0 {
+			b.retErr = err
+			return n, nil
+		}
+	} else {
+		err = b.retErr
+	}
+
+	from, err := b.f.Seek(io.SeekCurrent, 0)
+	if err != nil {
+		return 0, err
+	}
+	nd, err := tv(b.ctx, b.fileCid, nil, nil, gateway.CarParams{Scope: gateway.DagScopeEntity, Range: &gateway.DagByteRange{From: from, To: b.byteRange.To}}, b.getLsys)
+	if err != nil {
+		return 0, err
+	}
+
+	f, ok := nd.(files.File)
+	if !ok {
+		return 0, fmt.Errorf("not a file, should be unreachable")
+	}
+
+	b.f = f
+	return b.Read(p)
+}
+
+func (b *backpressuredFile) Seek(offset int64, whence int) (int64, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+var _ files.File = (*backpressuredFile)(nil)
+var _ AwaitCloser = (*backpressuredFile)(nil)
+
+type singleUseDirectory struct {
+	dirIter files.DirIterator
+	closed  chan error
+}
+
+func (b *singleUseDirectory) AwaitClose() <-chan error {
+	return b.closed
+}
+
+func (b *singleUseDirectory) Close() error {
+	close(b.closed)
+	return nil
+}
+
+func (b *singleUseDirectory) Size() (int64, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (b *singleUseDirectory) Entries() files.DirIterator {
+	return b.dirIter
+}
+
+var _ files.Directory = (*singleUseDirectory)(nil)
+var _ AwaitCloser = (*singleUseDirectory)(nil)
+
+type backpressuredFlatDirIter struct {
+	linksItr *dagpb.PBLinks__Itr
+	lsys     *ipld.LinkSystem
+	getLsys  lsysGetter
+	ctx      context.Context
+
+	curName string
+	curFile files.Node
+
+	err error
+}
+
+func (it *backpressuredFlatDirIter) Name() string {
+	return it.curName
+}
+
+func (it *backpressuredFlatDirIter) Node() files.Node {
+	return it.curFile
+}
+
+func (it *backpressuredFlatDirIter) Next() bool {
+	if it.err != nil {
+		return false
+	}
+
+	iter := it.linksItr
+	if iter.Done() {
+		return false
+	}
+
+	_, v := iter.Next()
+	c := v.Hash.Link().(cidlink.Link).Cid
+	var name string
+	if v.Name.Exists() {
+		name = v.Name.Must().String()
+	}
+
+	var nd files.Node
+	var err error
+	params := gateway.CarParams{Scope: gateway.DagScopeAll}
+	for {
+		if it.ctx.Err() != nil {
+			it.err = it.ctx.Err()
+			return false
+		}
+		if err != nil {
+			it.lsys, err = it.getLsys(it.ctx, c, params)
+			continue
+		}
+		nd, err = tv(it.ctx, c, nil, it.lsys, params, it.getLsys)
+		if err != nil {
+			if err := it.ctx.Err(); err == nil {
+				retry, processedErr := isRetryableError(err)
+				if retry {
+					err = processedErr
+					continue
+				}
+				it.err = processedErr
+				return false
+			}
+		}
+		break
+	}
+
+	it.curName = name
+	it.curFile = nd
+	return true
+
+	/*
+		Load link, figure out what it is:
+		1. If it's a symlink just stash it
+		2. If it's a raw block stash it?
+		3. If it's metadata then skip it
+		4. If it's a file return a wrapper around multireadcloser that waits for new lsys' to show up. There's got to be a way to feedback through the top requests for new lsys' along with the request we're waiting on for the retry
+		5. If it's a flat directory stash it (will need to carry the feedback layer for its children)
+		6. If it's a HAMT return an iterator that for "next" sends a request and waits for an lsys if there's a problem. Create the next object and return it passing through the request + response mechanisms for continuations
+	*/
+}
+
+func (it *backpressuredFlatDirIter) Err() error {
+	return it.err
+}
+
+var _ files.DirIterator = (*backpressuredFlatDirIter)(nil)
+
+type backpressuredHAMTDirIter struct {
+	linksItr ipld.MapIterator
+	dirCid   cid.Cid
+
+	lsys    *ipld.LinkSystem
+	getLsys lsysGetter
+	ctx     context.Context
+
+	curName      string
+	curFile      files.Node
+	curProcessed int
+
+	err error
+}
+
+func (it *backpressuredHAMTDirIter) Name() string {
+	return it.curName
+}
+
+func (it *backpressuredHAMTDirIter) Node() files.Node {
+	return it.curFile
+}
+
+func (it *backpressuredHAMTDirIter) Next() bool {
+	if it.err != nil {
+		return false
+	}
+
+	iter := it.linksItr
+	if iter.Done() {
+		return false
+	}
+
+	/*
+		Since there is no way to make a graph request for part of a HAMT during errors we can either fill in the HAMT with
+		block requests, or we can re-request the HAMT and skip over the parts we already have.
+
+		Here we choose the latter, however in the event of a re-request we request the entity rather than the entire DAG as
+		a compromise between more requests and over-fetching data.
+	*/
+
+	var err error
+	for {
+		if it.ctx.Err() != nil {
+			it.err = it.ctx.Err()
+			return false
+		}
+
+		retry, processedErr := isRetryableError(err)
+		if !retry {
+			it.err = processedErr
+			return false
+		}
+
+		var nd ipld.Node
+		if err != nil {
+			var lsys *ipld.LinkSystem
+			lsys, err = it.getLsys(it.ctx, it.dirCid, gateway.CarParams{Scope: gateway.DagScopeEntity})
+			if err != nil {
+				continue
+			}
+
+			_, pbn, fieldData, _, _, ufsBaseErr := loadUnixFSBase(it.ctx, it.dirCid, nil, lsys)
+			if err != nil {
+				err = ufsBaseErr
+				continue
+			}
+
+			nd, err = hamt.NewUnixFSHAMTShard(it.ctx, pbn, fieldData, lsys)
+			if err != nil {
+				err = fmt.Errorf("could not reify sharded directory: %w", err)
+				continue
+			}
+
+			iter = nd.MapIterator()
+			for i := 0; i < it.curProcessed; i++ {
+				_, _, err = iter.Next()
+				if err != nil {
+					continue
+				}
+			}
+
+			it.linksItr = nd.MapIterator()
+			iter = it.linksItr
+		}
+
+		var k, v ipld.Node
+		k, v, err = iter.Next()
+		if err != nil {
+			retry, processedErr = isRetryableError(err)
+			if retry {
+				err = processedErr
+				continue
+			}
+			it.err = processedErr
+			return false
+		}
+
+		var name string
+		name, err = k.AsString()
+		if err != nil {
+			it.err = err
+			return false
+		}
+		var lnk ipld.Link
+		lnk, err = v.AsLink()
+		if err != nil {
+			it.err = err
+			return false
+		}
+
+		cl, ok := lnk.(cidlink.Link)
+		if !ok {
+			it.err = fmt.Errorf("link not a cidlink")
+			return false
+		}
+
+		c := cl.Cid
+		params := gateway.CarParams{Scope: gateway.DagScopeAll}
+		var childNd files.Node
+		for {
+			if it.ctx.Err() != nil {
+				it.err = it.ctx.Err()
+				return false
+			}
+
+			if err != nil {
+				retry, processedErr = isRetryableError(err)
+				if !retry {
+					it.err = processedErr
+					return false
+				}
+
+				it.lsys, err = it.getLsys(it.ctx, c, params)
+				continue
+			}
+
+			childNd, err = tv(it.ctx, c, nil, it.lsys, params, it.getLsys)
+			if err != nil {
+				continue
+			}
+			break
+		}
+
+		it.curName = name
+		it.curFile = childNd
+		it.curProcessed++
+		break
+	}
+
+	return true
+
+	/*
+		Load link, figure out what it is:
+		1. If it's a symlink just stash it
+		2. If it's a raw block stash it?
+		3. If it's metadata then skip it
+		4. If it's a file return a wrapper around multireadcloser that waits for new lsys' to show up. There's got to be a way to feedback through the top requests for new lsys' along with the request we're waiting on for the retry
+		5. If it's a flat directory stash it (will need to carry the feedback layer for its children)
+		6. If it's a HAMT return an iterator that for "next" sends a request and waits for an lsys if there's a problem. Create the next object and return it passing through the request + response mechanisms for continuations
+	*/
+}
+
+func (it *backpressuredHAMTDirIter) Err() error {
+	return it.err
+}
+
+var _ files.DirIterator = (*backpressuredHAMTDirIter)(nil)
+
+/*
+1. Run traversal to get the top-level response
+2. Response can do a callback for another response
+*/
+
+type lsysGetter = func(ctx context.Context, c cid.Cid, params gateway.CarParams) (*ipld.LinkSystem, error)
+
+func loadUnixFSBase(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld.LinkSystem) ([]byte, dagpb.PBNode, ufsData.UnixFSData, int64, []byte, error) {
+	lctx := ipld.LinkContext{Ctx: ctx}
+	pathTerminalCidLink := cidlink.Link{Cid: c}
+
+	var blockData []byte
+	var err error
+
+	if blk != nil {
+		blockData = blk.RawData()
+	} else {
+		blockData, err = lsys.LoadRaw(lctx, pathTerminalCidLink)
+		if err != nil {
+			return nil, nil, nil, 0, nil, err
+		}
+	}
+
+	if c.Type() == uint64(multicodec.Raw) {
+		return blockData, nil, nil, 0, nil, nil
+	}
+
+	// decode the terminal block into a node
+	pc := dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
+		if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
+			return tlnkNd.LinkTargetNodePrototype(), nil
+		}
+		return basicnode.Prototype.Any, nil
+	})
+
+	np, err := pc(pathTerminalCidLink, lctx)
+	if err != nil {
+		return nil, nil, nil, 0, nil, err
+	}
+
+	decoder, err := lsys.DecoderChooser(pathTerminalCidLink)
+	if err != nil {
+		return nil, nil, nil, 0, nil, err
+	}
+	nb := np.NewBuilder()
+	if err := decoder(nb, bytes.NewReader(blockData)); err != nil {
+		return nil, nil, nil, 0, nil, err
+	}
+	lastCidNode := nb.Build()
+
+	if pbn, ok := lastCidNode.(dagpb.PBNode); !ok {
+		// If it's not valid dag-pb then we're done
+		return nil, nil, nil, 0, nil, errNotUnixFS
+	} else if !pbn.FieldData().Exists() {
+		// If it's not valid UnixFS then we're done
+		return nil, nil, nil, 0, nil, errNotUnixFS
+	} else if unixfsFieldData, decodeErr := ufsData.DecodeUnixFSData(pbn.Data.Must().Bytes()); decodeErr != nil {
+		return nil, nil, nil, 0, nil, errNotUnixFS
+	} else {
+		switch fieldNum := unixfsFieldData.FieldDataType().Int(); fieldNum {
+		case ufsData.Data_Symlink, ufsData.Data_Metadata, ufsData.Data_Raw, ufsData.Data_File, ufsData.Data_Directory, ufsData.Data_HAMTShard:
+			return nil, pbn, unixfsFieldData, fieldNum, pbn.FieldData().Must().Bytes(), nil
+		default:
+			return nil, nil, nil, 0, nil, errNotUnixFS
+		}
+	}
+}
+
+func tv(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld.LinkSystem, params gateway.CarParams, getLsys lsysGetter) (files.Node, error) {
+	var err error
+	if lsys == nil {
+		lsys, err = getLsys(ctx, c, params)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	lctx := ipld.LinkContext{Ctx: ctx}
+	blockData, pbn, _, fieldNum, fieldDataBytes, err := loadUnixFSBase(ctx, c, blk, lsys)
+	if err != nil {
+		return nil, err
+	}
+
+	if c.Type() == uint64(multicodec.Raw) {
+		return files.NewBytesFile(blockData), nil
+	}
+
+	switch fieldNum {
+	case ufsData.Data_Symlink:
+		lnkTarget := string(fieldDataBytes)
+		f := files.NewLinkFile(lnkTarget, nil)
+		return f, nil
+	case ufsData.Data_Metadata:
+		return nil, fmt.Errorf("UnixFS Metadata unsupported")
+	case ufsData.Data_HAMTShard, ufsData.Data_Directory:
+		switch fieldNum {
+		case ufsData.Data_Directory:
+			d := &singleUseDirectory{&backpressuredFlatDirIter{
+				ctx:      ctx,
+				linksItr: pbn.Links.Iterator(),
+				lsys:     lsys,
+				getLsys:  getLsys,
+			}, make(chan error)}
+			return d, nil
+		case ufsData.Data_HAMTShard:
+			dirNd, err := unixfsnode.Reify(lctx, pbn, lsys)
+			if err != nil {
+				return nil, fmt.Errorf("could not reify sharded directory: %w", err)
+			}
+
+			d := &singleUseDirectory{
+				&backpressuredHAMTDirIter{
+					linksItr: dirNd.MapIterator(),
+					dirCid:   c,
+					lsys:     lsys,
+					getLsys:  getLsys,
+					ctx:      ctx,
+				}, make(chan error),
+			}
+			return d, nil
+		default:
+			return nil, fmt.Errorf("not a basic or HAMT directory: should be unreachable")
+		}
+	case ufsData.Data_Raw, ufsData.Data_File:
+		nd, err := unixfsnode.Reify(lctx, pbn, lsys)
+		if err != nil {
+			return nil, err
+		}
+
+		fnd, ok := nd.(datamodel.LargeBytesNode)
+		if !ok {
+			return nil, fmt.Errorf("could not process file since it did not present as large bytes")
+		}
+		f, err := fnd.AsLargeBytes()
+		if err != nil {
+			return nil, err
+		}
+
+		fileSize, err := f.Seek(0, io.SeekEnd)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get UnixFS file size: %w", err)
+		}
+		_, err = f.Seek(0, io.SeekStart)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get reset UnixFS file reader: %w", err)
+		}
+
+		return &backpressuredFile{ctx: ctx, size: fileSize, f: f, getLsys: getLsys, closed: make(chan error)}, nil
+	default:
+		return nil, fmt.Errorf("unknown UnixFS field type")
+	}
+}
