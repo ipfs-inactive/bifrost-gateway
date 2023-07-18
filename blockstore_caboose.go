@@ -104,6 +104,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		PoolRefresh:  caboose.DefaultPoolRefreshInterval,
 		SaturnClient: saturnRetrievalClient,
 
-		ComplianceCidPeriod: int64(1),
+		// Temporarily commented out for caboose downgrade.
+		// ComplianceCidPeriod: int64(1),
 	})
 }
