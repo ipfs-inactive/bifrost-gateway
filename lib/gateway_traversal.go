@@ -117,7 +117,7 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 		}
 		if !ok || blkRead.err != nil {
 			if !ok || errors.Is(blkRead.err, io.EOF) {
-				return nil, io.EOF
+				return nil, io.ErrUnexpectedEOF
 			}
 			return nil, blkRead.err
 		}
