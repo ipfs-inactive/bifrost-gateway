@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
+
 	"github.com/ipld/go-ipld-prime/traversal"
 
 	"github.com/filecoin-saturn/caboose"
@@ -57,6 +59,8 @@ type DataCallback = caboose.DataCallback
 
 // TODO: Don't use a caboose type
 type ErrPartialResponse = caboose.ErrPartialResponse
+
+var ErrFetcherUnexpectedEOF = fmt.Errorf("failed to fetch IPLD data")
 
 type CarFetcher interface {
 	Fetch(ctx context.Context, path string, cb DataCallback) error
@@ -801,7 +805,6 @@ var _ io.ReadCloser = (*multiReadCloser)(nil)
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "all", "entityRanges": "0"}).Inc()
-	p := ipfspath.FromString(path.String())
 
 	type terminalPathType struct {
 		resp files.Node
@@ -840,59 +843,80 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 			}
 		}
 
-		err := api.fetchCAR(cctx, path, gateway.CarParams{Scope: gateway.DagScopeAll}, func(resource string, reader io.Reader) error {
+		p := ipfspath.FromString(path.String())
+		params := gateway.CarParams{Scope: gateway.DagScopeAll}
+
+		err := api.fetchCAR(cctx, path, params, func(resource string, reader io.Reader) error {
 			gb, err := carToLinearBlockGetter(cctx, reader, api.metrics)
 			if err != nil {
 				return err
 			}
 
 			lsys := getLinksystem(gb)
-			// First resolve the path since we always need to.
-			pathRootCids, terminalCid, remainder, terminalBlk, err := api.resolvePathWithRootsAndBlock(cctx, p, lsys)
-			if err != nil {
-				return err
-			}
-			md := contentMetadataFromRootsAndRemainder(p, pathRootCids, terminalCid, remainder)
-
-			if len(remainder) > 0 {
-				terminalPathElementCh <- terminalPathType{err: errNotUnixFS}
-				return nil
-			}
 
 			if hasSentAsyncData {
+				_, _, _, _, err = api.resolvePathToLastWithRoots(cctx, p, lsys)
+				if err != nil {
+					return err
+				}
+
 				select {
 				case sendResponse <- lsys:
-				case <-ctx.Done():
-					return ctx.Err()
+				case <-cctx.Done():
+					return cctx.Err()
 				}
-			}
+			} else {
+				// First resolve the path since we always need to.
+				pathRootCids, terminalCid, remainder, terminalBlk, err := api.resolvePathWithRootsAndBlock(cctx, p, lsys)
+				if err != nil {
+					return err
+				}
+				md := contentMetadataFromRootsAndRemainder(p, pathRootCids, terminalCid, remainder)
 
-			nd, err := tv(cctx, terminalCid, terminalBlk, lsys, gateway.CarParams{Scope: gateway.DagScopeAll}, getLsys)
-			if err != nil {
-				return err
-			}
+				if len(remainder) > 0 {
+					terminalPathElementCh <- terminalPathType{err: errNotUnixFS}
+					return nil
+				}
 
-			ndAc, ok := nd.(AwaitCloser)
-			if !ok {
+				if hasSentAsyncData {
+					select {
+					case sendResponse <- lsys:
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+
+				nd, err := tv(cctx, terminalCid, terminalBlk, lsys, params, getLsys)
+				if err != nil {
+					return err
+				}
+
+				ndAc, ok := nd.(AwaitCloser)
+				if !ok {
+					terminalPathElementCh <- terminalPathType{
+						resp: nd,
+						md:   md,
+					}
+					return nil
+				}
+
+				hasSentAsyncData = true
 				terminalPathElementCh <- terminalPathType{
 					resp: nd,
 					md:   md,
 				}
-				return nil
+
+				closeCh = ndAc.AwaitClose()
 			}
 
-			hasSentAsyncData = true
-			terminalPathElementCh <- terminalPathType{
-				resp: nd,
-				md:   md,
-			}
-
-			closeCh = ndAc.AwaitClose()
 			select {
 			case closeErr := <-closeCh:
 				return closeErr
 			case req := <-sendRequest:
 				requestStr := fmt.Sprintf("/ipfs/%s?%s", req.c.String(), paramsToString(req.params))
+				// set path and params for next iteration
+				p = ipfspath.FromCid(req.c)
+				params = req.params
 				return &ErrPartialResponse{StillNeed: []string{requestStr}}
 			case <-cctx.Done():
 				return cctx.Err()
@@ -905,19 +929,15 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 		}
 
 		if err != nil {
+			lsys := getLinksystem(func(ctx context.Context, cid cid.Cid) (blocks.Block, error) {
+				return nil, multierror.Append(ErrFetcherUnexpectedEOF, format.ErrNotFound{Cid: cid})
+			})
 			for {
 				select {
 				case <-closeCh:
 					return
 				case <-sendRequest:
-					lsys := getLinksystem(func(ctx context.Context, cid cid.Cid) (blocks.Block, error) {
-						return nil, fmt.Errorf("done trying to fetch CAR data: %w", format.ErrNotFound{Cid: cid})
-					})
-					select {
-					case sendResponse <- lsys:
-					case <-cctx.Done():
-						return
-					}
+				case sendResponse <- lsys:
 				case <-cctx.Done():
 					return
 				}
@@ -1205,20 +1225,22 @@ func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath,
 				return nil
 			}
 
-			cw, err = storage.NewWritable(w, []cid.Cid{terminalCid}, carv2.WriteAsCarV1(true))
-			if err != nil {
-				// io.PipeWriter.CloseWithError always returns nil.
-				_ = w.CloseWithError(err)
-				return nil
-			}
-			for _, blk := range blockBuffer {
-				err = cw.Put(ctx, blk.Cid().KeyString(), blk.RawData())
+			if cw == nil {
+				cw, err = storage.NewWritable(w, []cid.Cid{terminalCid}, carv2.WriteAsCarV1(true))
 				if err != nil {
-					_ = w.CloseWithError(fmt.Errorf("error writing car block: %w", err))
+					// io.PipeWriter.CloseWithError always returns nil.
+					_ = w.CloseWithError(err)
 					return nil
 				}
+				for _, blk := range blockBuffer {
+					err = cw.Put(ctx, blk.Cid().KeyString(), blk.RawData())
+					if err != nil {
+						_ = w.CloseWithError(fmt.Errorf("error writing car block: %w", err))
+						return nil
+					}
+				}
+				blockBuffer = nil
 			}
-			blockBuffer = nil
 
 			err = walkGatewaySimpleSelector(ctx, terminalBlk, params, l)
 			if err != nil {
@@ -1333,6 +1355,10 @@ func checkRetryableError(e *error, fn func() error) error {
 }
 
 func isRetryableError(err error) (bool, error) {
+	if errors.Is(err, ErrFetcherUnexpectedEOF) {
+		return false, err
+	}
+
 	if format.IsNotFound(err) {
 		return true, err
 	}

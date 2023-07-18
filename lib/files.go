@@ -66,7 +66,7 @@ func (b *backpressuredFile) Read(p []byte) (n int, err error) {
 		err = b.retErr
 	}
 
-	from, err := b.f.Seek(io.SeekCurrent, 0)
+	from, err := b.f.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return 0, err
 	}
@@ -85,8 +85,7 @@ func (b *backpressuredFile) Read(p []byte) (n int, err error) {
 }
 
 func (b *backpressuredFile) Seek(offset int64, whence int) (int64, error) {
-	//TODO implement me
-	panic("implement me")
+	return b.f.Seek(offset, whence)
 }
 
 var _ files.File = (*backpressuredFile)(nil)
@@ -266,7 +265,7 @@ func (it *backpressuredHAMTDirIter) Next() bool {
 			}
 
 			_, pbn, fieldData, _, _, ufsBaseErr := loadUnixFSBase(it.ctx, it.dirCid, nil, lsys)
-			if err != nil {
+			if ufsBaseErr != nil {
 				err = ufsBaseErr
 				continue
 			}
@@ -285,8 +284,7 @@ func (it *backpressuredHAMTDirIter) Next() bool {
 				}
 			}
 
-			it.linksItr = nd.MapIterator()
-			iter = it.linksItr
+			it.linksItr = iter
 		}
 
 		var k, v ipld.Node
@@ -514,12 +512,17 @@ func tv(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld.LinkSystem,
 		if err != nil {
 			return nil, fmt.Errorf("unable to get UnixFS file size: %w", err)
 		}
-		_, err = f.Seek(0, io.SeekStart)
+
+		from := int64(0)
+		if params.Range != nil {
+			from = params.Range.From
+		}
+		_, err = f.Seek(from, io.SeekStart)
 		if err != nil {
 			return nil, fmt.Errorf("unable to get reset UnixFS file reader: %w", err)
 		}
 
-		return &backpressuredFile{ctx: ctx, size: fileSize, f: f, getLsys: getLsys, closed: make(chan error)}, nil
+		return &backpressuredFile{ctx: ctx, fileCid: c, size: fileSize, f: f, getLsys: getLsys, closed: make(chan error)}, nil
 	default:
 		return nil, fmt.Errorf("unknown UnixFS field type")
 	}
