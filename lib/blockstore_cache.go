@@ -21,27 +21,32 @@ const DefaultCacheBlockStoreSize = 1024
 
 var cacheLog = golog.Logger("cache/block")
 
-var cacheHitsMetric = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: "ipfs",
-	Subsystem: "http",
-	Name:      "blockstore_cache_hit",
-	Help:      "The number of global block cache hits.",
-})
-
-var cacheRequestsMetric = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: "ipfs",
-	Subsystem: "http",
-	Name:      "blockstore_cache_requests",
-	Help:      "The number of global block cache requests.",
-})
-
-func init() {
-	prometheus.Register(cacheHitsMetric)
-	prometheus.Register(cacheRequestsMetric)
-}
-
 func NewCacheBlockStore(size int) (blockstore.Blockstore, error) {
 	c, err := lru.New2Q[string, []byte](size)
+	if err != nil {
+		return nil, err
+	}
+
+	cacheHitsMetric := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "ipfs",
+		Subsystem: "http",
+		Name:      "blockstore_cache_hit",
+		Help:      "The number of global block cache hits.",
+	})
+
+	cacheRequestsMetric := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "ipfs",
+		Subsystem: "http",
+		Name:      "blockstore_cache_requests",
+		Help:      "The number of global block cache requests.",
+	})
+
+	err = prometheus.Register(cacheHitsMetric)
+	if err != nil {
+		return nil, err
+	}
+
+	err = prometheus.Register(cacheRequestsMetric)
 	if err != nil {
 		return nil, err
 	}
