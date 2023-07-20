@@ -21,7 +21,6 @@ RUN --mount=target=. \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o $GOPATH/bin/bifrost-gateway
 
 #------------------------------------------------------
-#FROM busybox:1.34.1-glibc
 FROM alpine:3.18
 
 # This runs bifrost-gateway

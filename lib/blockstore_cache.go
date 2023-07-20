@@ -3,8 +3,6 @@ package lib
 import (
 	"context"
 	"errors"
-	"sync/atomic"
-	"time"
 
 	"github.com/ipfs/go-cid"
 	format "github.com/ipfs/go-ipld-format"
@@ -23,39 +21,42 @@ const DefaultCacheBlockStoreSize = 1024
 
 var cacheLog = golog.Logger("cache/block")
 
-var cacheHitsMetric = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: "ipfs",
-	Subsystem: "http",
-	Name:      "blockstore_cache_hit",
-	Help:      "The number of global block cache hits.",
-})
-
-var cacheRequestsMetric = prometheus.NewCounter(prometheus.CounterOpts{
-	Namespace: "ipfs",
-	Subsystem: "http",
-	Name:      "blockstore_cache_requests",
-	Help:      "The number of global block cache requests.",
-})
-
-func init() {
-	prometheus.Register(cacheHitsMetric)
-	prometheus.Register(cacheRequestsMetric)
-}
-
 func NewCacheBlockStore(size int) (blockstore.Blockstore, error) {
 	c, err := lru.New2Q[string, []byte](size)
 	if err != nil {
 		return nil, err
 	}
 
-	cbs := cacheBlockStore{
+	cacheHitsMetric := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "ipfs",
+		Subsystem: "http",
+		Name:      "blockstore_cache_hit",
+		Help:      "The number of global block cache hits.",
+	})
+
+	cacheRequestsMetric := prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "ipfs",
+		Subsystem: "http",
+		Name:      "blockstore_cache_requests",
+		Help:      "The number of global block cache requests.",
+	})
+
+	err = prometheus.Register(cacheHitsMetric)
+	if err != nil {
+		return nil, err
+	}
+
+	err = prometheus.Register(cacheRequestsMetric)
+	if err != nil {
+		return nil, err
+	}
+
+	return &cacheBlockStore{
 		cache:               c,
 		rehash:              uatomic.NewBool(false),
 		cacheHitsMetric:     cacheHitsMetric,
 		cacheRequestsMetric: cacheRequestsMetric,
-		putDeficit:          atomic.Int32{},
-	}
-	return &cbs, nil
+	}, nil
 }
 
 type cacheBlockStore struct {
@@ -63,8 +64,6 @@ type cacheBlockStore struct {
 	rehash              *uatomic.Bool
 	cacheHitsMetric     prometheus.Counter
 	cacheRequestsMetric prometheus.Counter
-
-	putDeficit atomic.Int32
 }
 
 func (l *cacheBlockStore) DeleteBlock(ctx context.Context, c cid.Cid) error {
@@ -77,7 +76,6 @@ func (l *cacheBlockStore) Has(ctx context.Context, c cid.Cid) (bool, error) {
 }
 
 func (l *cacheBlockStore) Get(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	l.putDeficit.Add(-1)
 	l.cacheRequestsMetric.Add(1)
 
 	blkData, found := l.cache.Get(string(c.Hash()))
@@ -124,11 +122,6 @@ func (l *cacheBlockStore) Put(ctx context.Context, blk blocks.Block) error {
 
 func (l *cacheBlockStore) PutMany(ctx context.Context, blks []blocks.Block) error {
 	for _, b := range blks {
-		new := l.putDeficit.Add(1)
-		if new > 0 {
-			time.Sleep(time.Millisecond * time.Duration(new))
-		}
-
 		if err := l.Put(ctx, b); err != nil {
 			return err
 		}

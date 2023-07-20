@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/semaphore"
-
 	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/boxo/blockservice"
 	blockstore "github.com/ipfs/boxo/blockstore"
@@ -29,12 +27,15 @@ import (
 	ipfspath "github.com/ipfs/boxo/path"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
+	format "github.com/ipfs/go-ipld-format"
 	golog "github.com/ipfs/go-log/v2"
 	routinghelpers "github.com/libp2p/go-libp2p-routing-helpers"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/routing"
 	"github.com/multiformats/go-multicodec"
+	"github.com/multiformats/go-multihash"
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/multierr"
 )
 
 var graphLog = golog.Logger("backend/graph")
@@ -86,6 +87,14 @@ type Notifier interface {
 	NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error
 }
 
+// notifiersForRootCid is used for reducing lock contention by only notifying
+// exchanges related to the same content root CID
+type notifiersForRootCid struct {
+	lk        sync.RWMutex
+	deleted   int8
+	notifiers []Notifier
+}
+
 type GraphGateway struct {
 	fetcher      CarFetcher
 	blockFetcher exchange.Fetcher
@@ -93,7 +102,8 @@ type GraphGateway struct {
 	namesys      namesys.NameSystem
 	bstore       blockstore.Blockstore
 
-	metrics *GraphGatewayMetrics
+	notifiers sync.Map // cid -> notifiersForRootCid
+	metrics   *GraphGatewayMetrics
 }
 
 type GraphGatewayMetrics struct {
@@ -153,6 +163,7 @@ func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ..
 		routing:      vs,
 		namesys:      ns,
 		bstore:       bs,
+		notifiers:    sync.Map{},
 		metrics:      registerGraphGatewayMetrics(),
 	}, nil
 }
@@ -242,12 +253,16 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 	}
 }
 
-var cacheLimiter = semaphore.NewWeighted(4096)
-var cachePool = sync.Pool{
-	New: func() any {
-		bs, _ := NewCacheBlockStore(384)
-		return bs
-	},
+func (api *GraphGateway) getRootOfPath(path string) string {
+	pth, err := ipfspath.ParsePath(path)
+	if err != nil {
+		return path
+	}
+	if pth.IsJustAKey() {
+		return pth.Segments()[0]
+	} else {
+		return pth.Segments()[1]
+	}
 }
 
 /*
@@ -261,8 +276,36 @@ Implementation iteration plan:
 */
 
 func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx context.Context, path string) (gateway.IPFSBackend, func(), error) {
-	bstore := cachePool.Get().(blockstore.Blockstore)
-	exch := newBlockExchange(bstore, api.blockFetcher)
+	bstore := api.bstore
+	carFetchingExch := newInboundBlockExchange()
+	doneWithFetcher := make(chan struct{}, 1)
+	exch := &handoffExchange{
+		startingExchange: carFetchingExch,
+		followupExchange: &blockFetcherExchWrapper{api.blockFetcher},
+		bstore:           bstore,
+		handoffCh:        doneWithFetcher,
+		metrics:          api.metrics,
+	}
+
+	notifierKey := api.getRootOfPath(path)
+	var notifier *notifiersForRootCid
+	for {
+		notifiers, _ := api.notifiers.LoadOrStore(notifierKey, &notifiersForRootCid{notifiers: []Notifier{}})
+		if n, ok := notifiers.(*notifiersForRootCid); ok {
+			n.lk.Lock()
+			// could have been deleted after our load. try again.
+			if n.deleted != 0 {
+				n.lk.Unlock()
+				continue
+			}
+			notifier = n
+			n.notifiers = append(n.notifiers, exch)
+			n.lk.Unlock()
+			break
+		} else {
+			return nil, nil, errors.New("failed to get notifier")
+		}
+	}
 
 	go func(metrics *GraphGatewayMetrics) {
 		defer func() {
@@ -300,9 +343,6 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 					blk, rdErr := cr.Next()
 					select {
 					case blkCh <- blockRead{blk, rdErr}:
-						if rdErr != nil {
-							return
-						}
 					case <-cbCtx.Done():
 						return
 					}
@@ -330,29 +370,62 @@ func (api *GraphGateway) loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx con
 					return blkRead.err
 				}
 				if blkRead.block != nil {
-					if err := bstore.PutMany(ctx, []blocks.Block{blkRead.block}); err != nil {
+					if err := bstore.Put(ctx, blkRead.block); err != nil {
 						return err
 					}
 					metrics.carBlocksFetchedMetric.Inc()
-					exch.NotifyNewBlocks(ctx, blkRead.block)
+					api.notifyOngoingRequests(ctx, notifierKey, blkRead.block)
 				}
 			}
 		})
 		if err != nil {
 			graphLog.Infow("car Fetch failed", "path", path, "error", err)
 		}
-		if err := exch.Close(); err != nil {
+		if err := carFetchingExch.Close(); err != nil {
 			graphLog.Errorw("carFetchingExch.Close()", "error", err)
 		}
+		doneWithFetcher <- struct{}{}
+		close(doneWithFetcher)
 	}(api.metrics)
 
 	bserv := blockservice.New(bstore, exch)
-	blkgw, err := gateway.NewBlocksGateway(bserv)
+	blkgw, err := gateway.NewBlocksBackend(bserv)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return blkgw, func() {}, nil
+	return blkgw, func() {
+		notifier.lk.Lock()
+		for i, e := range notifier.notifiers {
+			if e == exch {
+				notifier.notifiers = append(notifier.notifiers[0:i], notifier.notifiers[i+1:]...)
+				break
+			}
+		}
+		if len(notifier.notifiers) == 0 {
+			notifier.deleted = 1
+			api.notifiers.Delete(notifierKey)
+		}
+		notifier.lk.Unlock()
+	}, nil
+}
+
+func (api *GraphGateway) notifyOngoingRequests(ctx context.Context, key string, blks ...blocks.Block) {
+	if notifiers, ok := api.notifiers.Load(key); ok {
+		notifier, ok := notifiers.(*notifiersForRootCid)
+		if !ok {
+			graphLog.Errorw("notifyOngoingRequests failed", "key", key, "error", "could not get notifiersForRootCid")
+			return
+		}
+		notifier.lk.RLock()
+		for _, n := range notifier.notifiers {
+			err := n.NotifyNewBlocks(ctx, blks...)
+			if err != nil {
+				graphLog.Errorw("notifyOngoingRequests failed", "key", key, "error", err)
+			}
+		}
+		notifier.lk.RUnlock()
+	}
 }
 
 type fileCloseWrapper struct {
@@ -395,11 +468,6 @@ func wrapNodeWithClose[T files.Node](node T, closeFn func()) (T, error) {
 }
 
 func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, byteRanges ...gateway.ByteRange) (gateway.ContentPathMetadata, *gateway.GetResponse, error) {
-	if err := cacheLimiter.Acquire(ctx, 1); err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	defer cacheLimiter.Release(1)
-
 	rangeCount := len(byteRanges)
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "entity", "entityRanges": strconv.Itoa(rangeCount)}).Inc()
 
@@ -447,11 +515,6 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 }
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	if err := cacheLimiter.Acquire(ctx, 1); err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	defer cacheLimiter.Release(1)
-
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "all", "entityRanges": "0"}).Inc()
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=all")
 	if err != nil {
@@ -469,11 +532,6 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 }
 
 func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.File, error) {
-	if err := cacheLimiter.Acquire(ctx, 1); err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	defer cacheLimiter.Release(1)
-
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "block", "entityRanges": "0"}).Inc()
 	// TODO: if path is `/ipfs/cid`, we should use ?format=raw
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=block")
@@ -492,11 +550,6 @@ func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePat
 }
 
 func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
-	if err := cacheLimiter.Acquire(ctx, 1); err != nil {
-		return gateway.ContentPathMetadata{}, nil, err
-	}
-	defer cacheLimiter.Release(1)
-
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "entity", "entityRanges": "1"}).Inc()
 
 	// TODO:  we probably want to move this either to boxo, or at least to loadRequestIntoSharedBlockstoreAndBlocksGateway
@@ -529,19 +582,14 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 	return blkgw.ResolvePath(ctx, path)
 }
 
-func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, io.ReadCloser, <-chan error, error) {
-	if err := cacheLimiter.Acquire(ctx, 1); err != nil {
-		return gateway.ContentPathMetadata{}, nil, nil, err
-	}
-	defer cacheLimiter.Release(1)
-
+func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath, params gateway.CarParams) (gateway.ContentPathMetadata, io.ReadCloser, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "all", "entityRanges": "0"}).Inc()
 	blkgw, closeFn, err := api.loadRequestIntoSharedBlockstoreAndBlocksGateway(ctx, path.String()+"?format=car&dag-scope=all")
 	if err != nil {
-		return gateway.ContentPathMetadata{}, nil, nil, err
+		return gateway.ContentPathMetadata{}, nil, err
 	}
 	defer closeFn()
-	return blkgw.GetCAR(ctx, path)
+	return blkgw.GetCAR(ctx, path, params)
 }
 
 func (api *GraphGateway) IsCached(ctx context.Context, path ifacepath.Path) bool {
@@ -551,13 +599,13 @@ func (api *GraphGateway) IsCached(ctx context.Context, path ifacepath.Path) bool
 // TODO: This is copy-paste from blocks gateway, maybe share code
 func (api *GraphGateway) GetIPNSRecord(ctx context.Context, c cid.Cid) ([]byte, error) {
 	if api.routing == nil {
-		return nil, gateway.NewErrorResponse(errors.New("IPNS Record responses are not supported by this gateway"), http.StatusNotImplemented)
+		return nil, gateway.NewErrorStatusCode(errors.New("IPNS Record responses are not supported by this gateway"), http.StatusNotImplemented)
 	}
 
 	// Fails fast if the CID is not an encoded Libp2p Key, avoids wasteful
 	// round trips to the remote routing provider.
 	if multicodec.Code(c.Type()) != multicodec.Libp2pKey {
-		return nil, gateway.NewErrorResponse(errors.New("cid codec must be libp2p-key"), http.StatusBadRequest)
+		return nil, gateway.NewErrorStatusCode(errors.New("cid codec must be libp2p-key"), http.StatusBadRequest)
 	}
 
 	// The value store expects the key itself to be encoded as a multihash.
@@ -595,7 +643,7 @@ func (api *GraphGateway) ResolveMutable(ctx context.Context, p ifacepath.Path) (
 		}
 		return imPath, nil
 	default:
-		return gateway.ImmutablePath{}, gateway.NewErrorResponse(fmt.Errorf("unsupported path namespace: %s", p.Namespace()), http.StatusNotImplemented)
+		return gateway.ImmutablePath{}, gateway.NewErrorStatusCode(fmt.Errorf("unsupported path namespace: %s", p.Namespace()), http.StatusNotImplemented)
 	}
 }
 
@@ -609,81 +657,189 @@ func (api *GraphGateway) GetDNSLinkRecord(ctx context.Context, hostname string) 
 		return ifacepath.New(p.String()), err
 	}
 
-	return nil, gateway.NewErrorResponse(errors.New("not implemented"), http.StatusNotImplemented)
+	return nil, gateway.NewErrorStatusCode(errors.New("not implemented"), http.StatusNotImplemented)
 }
 
 var _ gateway.IPFSBackend = (*GraphGateway)(nil)
 
-type blockingExchange struct {
-	notify chan struct{}
-	nl     sync.Mutex
-
-	bstore blockstore.Blockstore
-	f      exchange.Fetcher
+type inboundBlockExchange struct {
+	ps BlockPubSub
 }
 
-func newBlockExchange(bstore blockstore.Blockstore, fetcher exchange.Fetcher) *blockingExchange {
-	return &blockingExchange{
-		notify: make(chan struct{}),
-		bstore: bstore,
-		f:      fetcher,
+func newInboundBlockExchange() *inboundBlockExchange {
+	return &inboundBlockExchange{
+		ps: NewBlockPubSub(),
 	}
 }
 
-func (b *blockingExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	<-b.notify
-
+func (i *inboundBlockExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+	blk, more := <-i.ps.Subscribe(ctx, c.Hash())
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if !more {
+		return nil, format.ErrNotFound{Cid: c}
+	}
+	return blk, nil
+}
 
-	if blk, err := b.bstore.Get(ctx, c); err == nil {
+func (i *inboundBlockExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
+	mhMap := make(map[string]struct{})
+	for _, c := range cids {
+		mhMap[string(c.Hash())] = struct{}{}
+	}
+	mhs := make([]multihash.Multihash, 0, len(mhMap))
+	for k := range mhMap {
+		mhs = append(mhs, multihash.Multihash(k))
+	}
+	return i.ps.Subscribe(ctx, mhs...), nil
+}
+
+func (i *inboundBlockExchange) NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error {
+	// TODO: handle context cancellation and/or blockage here
+	i.ps.Publish(blocks...)
+	return nil
+}
+
+func (i *inboundBlockExchange) Close() error {
+	i.ps.Shutdown()
+	return nil
+}
+
+var _ exchange.Interface = (*inboundBlockExchange)(nil)
+
+type handoffExchange struct {
+	startingExchange, followupExchange exchange.Interface
+	bstore                             blockstore.Blockstore
+	handoffCh                          <-chan struct{}
+	metrics                            *GraphGatewayMetrics
+}
+
+func (f *handoffExchange) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+	blkCh, err := f.startingExchange.GetBlocks(ctx, []cid.Cid{c})
+	if err != nil {
+		return nil, err
+	}
+	blk, ok := <-blkCh
+	if ok {
 		return blk, nil
 	}
-	blk, err := b.f.GetBlock(ctx, c)
-	if err == nil && blk != nil {
-		b.bstore.Put(ctx, blk)
+
+	select {
+	case <-f.handoffCh:
+		graphLog.Debugw("switching to backup block fetcher", "cid", c)
+		f.metrics.blockRecoveryAttemptMetric.Inc()
+		return f.followupExchange.GetBlock(ctx, c)
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
-	return blk, err
 }
 
-func (b *blockingExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
-	ch := make(chan blocks.Block)
+func (f *handoffExchange) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
+	blkCh, err := f.startingExchange.GetBlocks(ctx, cids)
+	if err != nil {
+		return nil, err
+	}
 
-	go func(ctx context.Context, cids []cid.Cid) {
-		for _, c := range cids {
-			blk, err := b.GetBlock(ctx, c)
-			if ctx.Err() != nil {
-				return
+	retCh := make(chan blocks.Block)
+
+	go func() {
+		cs := cid.NewSet()
+		for cs.Len() < len(cids) {
+			blk, ok := <-blkCh
+			if !ok {
+				break
 			}
-			if err == nil {
-				ch <- blk
+			select {
+			case retCh <- blk:
+				cs.Add(blk.Cid())
+			case <-ctx.Done():
 			}
 		}
-	}(ctx, cids)
 
-	return ch, nil
+		for cs.Len() < len(cids) {
+			select {
+			case <-ctx.Done():
+				return
+			case <-f.handoffCh:
+				var newCidArr []cid.Cid
+				for _, c := range cids {
+					if !cs.Has(c) {
+						blk, _ := f.bstore.Get(ctx, c)
+						if blk != nil {
+							select {
+							case retCh <- blk:
+								cs.Add(blk.Cid())
+							case <-ctx.Done():
+								return
+							}
+						} else {
+							newCidArr = append(newCidArr, c)
+						}
+					}
+				}
+
+				if len(newCidArr) == 0 {
+					return
+				}
+
+				graphLog.Debugw("needed to use use a backup fetcher for cids", "cids", newCidArr)
+				f.metrics.blockRecoveryAttemptMetric.Add(float64(len(newCidArr)))
+				fch, err := f.followupExchange.GetBlocks(ctx, newCidArr)
+				if err != nil {
+					graphLog.Errorw("error getting blocks from followupExchange", "error", err)
+					return
+				}
+				for cs.Len() < len(cids) {
+					blk, ok := <-fch
+					if !ok {
+						return
+					}
+					select {
+					case retCh <- blk:
+						cs.Add(blk.Cid())
+					case <-ctx.Done():
+						return
+					}
+				}
+			}
+		}
+	}()
+	return retCh, nil
 }
 
-func (b *blockingExchange) NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error {
-	b.nl.Lock()
-	defer b.nl.Unlock()
-	on := b.notify
-	if on == nil {
-		return nil
-	}
-	b.notify = make(chan struct{})
-	close(on)
+func (f *handoffExchange) NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error {
+	err1 := f.startingExchange.NotifyNewBlocks(ctx, blocks...)
+	err2 := f.followupExchange.NotifyNewBlocks(ctx, blocks...)
+	return multierr.Combine(err1, err2)
+}
+
+func (f *handoffExchange) Close() error {
+	err1 := f.startingExchange.Close()
+	err2 := f.followupExchange.Close()
+	return multierr.Combine(err1, err2)
+}
+
+var _ exchange.Interface = (*handoffExchange)(nil)
+
+type blockFetcherExchWrapper struct {
+	f exchange.Fetcher
+}
+
+func (b *blockFetcherExchWrapper) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+	return b.f.GetBlock(ctx, c)
+}
+
+func (b *blockFetcherExchWrapper) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
+	return b.f.GetBlocks(ctx, cids)
+}
+
+func (b *blockFetcherExchWrapper) NotifyNewBlocks(ctx context.Context, blocks ...blocks.Block) error {
 	return nil
 }
 
-func (b *blockingExchange) Close() error {
-	b.nl.Lock()
-	on := b.notify
-	b.notify = nil
-	close(on)
-	b.nl.Unlock()
+func (b *blockFetcherExchWrapper) Close() error {
 	return nil
 }
 
-var _ exchange.Interface = (*blockingExchange)(nil)
+var _ exchange.Interface = (*blockFetcherExchWrapper)(nil)
