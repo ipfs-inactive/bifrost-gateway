@@ -646,7 +646,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 							}}
 
 							dirLinkNum++
-							if dirLinkNum-1 <= lastDirLinkNum {
+							if dirLinkNum-1 < lastDirLinkNum {
 								continue
 							}
 
