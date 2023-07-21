@@ -34,6 +34,7 @@ const (
 	EnvKuboRPC        = "KUBO_RPC_URL"
 	EnvBlockCacheSize = "BLOCK_CACHE_SIZE"
 	EnvGraphBackend   = "GRAPH_BACKEND"
+	RequestIDHeader   = "X-Bfid"
 )
 
 func init() {
