@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -23,6 +22,7 @@ import (
 	servertiming "github.com/mitchellh/go-server-timing"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	requestcontext "github.com/willscott/go-requestcontext"
 )
 
 func makeMetricsAndDebuggingHandler(port int) (*http.Server, error) {
@@ -64,16 +64,6 @@ func withRequestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		goLog.Infow(r.Method, "url", r.URL, "host", r.Host)
 		// TODO: if debug is enabled, show more? goLog.Infow("request received", "url", r.URL, "host", r.Host, "method", r.Method, "ua", r.UserAgent(), "referer", r.Referer())
-		next.ServeHTTP(w, r)
-	})
-}
-
-func withIDContext(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		id := r.Header.Get(RequestIDHeader)
-		if id != "" {
-			r = r.WithContext(context.WithValue(r.Context(), RequestIDHeader, id))
-		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -174,7 +164,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	handler := withConnect(mux)
 	handler = http.Handler(gateway.NewHostnameHandler(gwConf, gwAPI, handler))
 	handler = servertiming.Middleware(handler, nil)
-	handler = withIDContext(handler)
+	handler = requestcontext.Middleware(handler, RequestIDHeader)
 
 	// Add logging.
 	handler = withRequestLogger(handler)
