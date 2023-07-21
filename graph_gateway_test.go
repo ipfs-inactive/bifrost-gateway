@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	_ "embed"
@@ -452,6 +453,111 @@ func sendBlocks(ctx context.Context, carFixture []byte, writer io.Writer, cidStr
 		}
 	}
 	return nil
+}
+
+func TestGetHAMTDirectory(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	requestNum := 0
+	s := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestNum++
+		switch requestNum {
+		case 1:
+			// Expect the full request, but return one that terminates in the middle of the path
+			expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir/"
+			if request.URL.Path != expectedUri {
+				panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
+			}
+
+			if err := sendBlocks(ctx, dirWithMultiblockHAMTandFiles, writer, []string{
+				"bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi", // root dir
+			}); err != nil {
+				panic(err)
+			}
+		case 2:
+			// Expect the full request, but return one that terminates in the middle of the HAMT
+			// Note: this is an implementation detail, it could be in the future that we request less data (e.g. partial path)
+			expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir/"
+			if request.URL.Path != expectedUri {
+				panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
+			}
+
+			if err := sendBlocks(ctx, dirWithMultiblockHAMTandFiles, writer, []string{
+				"bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi", // root dir
+				"bafybeignui4g7l6cvqyy4t6vnbl2fjtego4ejmpcia77jhhwnksmm4bejm", // hamt root
+			}); err != nil {
+				panic(err)
+			}
+
+		case 3:
+			// Expect the full request and return the full HAMT
+			// Note: this is an implementation detail, it could be in the future that we request less data (e.g. ask for index.html first, or make a spec change to allow asking for it with a fallback to the directory)
+			expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir/"
+			if request.URL.Path != expectedUri {
+				panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
+			}
+
+			if err := sendBlocks(ctx, dirWithMultiblockHAMTandFiles, writer, []string{
+				"bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi", // root dir
+				"bafybeignui4g7l6cvqyy4t6vnbl2fjtego4ejmpcia77jhhwnksmm4bejm", // hamt root
+				"bafybeiccgo7euew77gkqkhezn3pozfrciiibqz2u3spdqmgjvd5wqskipm", // inner hamt nodes start here
+				"bafybeihjydob4eq5j4m43whjgf5cgftthc42kjno3g24sa3wcw7vonbmfy",
+			}); err != nil {
+				panic(err)
+			}
+		case 4:
+			// Expect a request for a non-existent index.html file
+			// Note: this is an implementation detail related to the directory request above
+			expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir//index.html"
+			if request.URL.Path != expectedUri {
+				panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
+			}
+
+			if err := sendBlocks(ctx, dirWithMultiblockHAMTandFiles, writer, []string{
+				"bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi", // root dir
+				"bafybeignui4g7l6cvqyy4t6vnbl2fjtego4ejmpcia77jhhwnksmm4bejm", // hamt root
+				"bafybeiccgo7euew77gkqkhezn3pozfrciiibqz2u3spdqmgjvd5wqskipm", // inner hamt nodes start here
+			}); err != nil {
+				panic(err)
+			}
+
+		default:
+			t.Fatal("unsupported request number")
+		}
+	}))
+	defer s.Close()
+
+	bs := newProxyBlockStore([]string{s.URL}, newCachedDNS(dnsCacheRefreshInterval))
+	exch, err := newExchange(bs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3}, exch)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	trustedGatewayServer := httptest.NewServer(gateway.NewHandler(gateway.Config{DeserializedResponses: true}, backend))
+	defer trustedGatewayServer.Close()
+
+	resp, err := http.Get(trustedGatewayServer.URL + "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir/")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Count(string(data), ">exampleD-hamt-collide-exampleB-seed-364<") == 1 &&
+		strings.Count(string(data), ">exampleC-hamt-collide-exampleA-seed-52<") == 1 &&
+		strings.Count(string(data), ">exampleA<") == 1 &&
+		strings.Count(string(data), ">exampleB<") == 1 {
+		return
+	}
+	t.Fatal("directory does not contain the expected links")
 }
 
 func TestGetCAR(t *testing.T) {
