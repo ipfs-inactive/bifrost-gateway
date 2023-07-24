@@ -22,6 +22,7 @@ import (
 	servertiming "github.com/mitchellh/go-server-timing"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	requestcontext "github.com/willscott/go-requestcontext"
 )
 
 func makeMetricsAndDebuggingHandler(port int) (*http.Server, error) {
@@ -163,6 +164,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	handler := withConnect(mux)
 	handler = http.Handler(gateway.NewHostnameHandler(gwConf, gwAPI, handler))
 	handler = servertiming.Middleware(handler, nil)
+	handler = requestcontext.Middleware(handler, RequestIDHeader)
 
 	// Add logging.
 	handler = withRequestLogger(handler)
