@@ -66,9 +66,10 @@ type CarFetcher interface {
 }
 
 type gwOptions struct {
-	ns namesys.NameSystem
-	vs routing.ValueStore
-	bs blockstore.Blockstore
+	ns           namesys.NameSystem
+	vs           routing.ValueStore
+	bs           blockstore.Blockstore
+	promRegistry prometheus.Registerer
 }
 
 // WithNameSystem sets the name system to use for the gateway. If not set it will use a default DNSLink resolver
@@ -92,6 +93,14 @@ func WithValueStore(vs routing.ValueStore) GraphGatewayOption {
 func WithBlockstore(bs blockstore.Blockstore) GraphGatewayOption {
 	return func(opts *gwOptions) error {
 		opts.bs = bs
+		return nil
+	}
+}
+
+// WithPrometheusRegistry sets the registry to use for metrics collection
+func WithPrometheusRegistry(reg prometheus.Registerer) GraphGatewayOption {
+	return func(opts *gwOptions) error {
+		opts.promRegistry = reg
 		return nil
 	}
 }
@@ -162,6 +171,11 @@ func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ..
 		bs = cbs
 	}
 
+	var promReg prometheus.Registerer = prometheus.NewRegistry()
+	if compiledOptions.promRegistry != nil {
+		promReg = compiledOptions.promRegistry
+	}
+
 	return &GraphGateway{
 		fetcher:      f,
 		blockFetcher: blockFetcher,
@@ -169,7 +183,7 @@ func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ..
 		namesys:      ns,
 		bstore:       bs,
 		notifiers:    sync.Map{},
-		metrics:      registerGraphGatewayMetrics(),
+		metrics:      registerGraphGatewayMetrics(promReg),
 		pc: dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
 			if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
 				return tlnkNd.LinkTargetNodePrototype(), nil
@@ -179,8 +193,7 @@ func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ..
 	}, nil
 }
 
-func registerGraphGatewayMetrics() *GraphGatewayMetrics {
-
+func registerGraphGatewayMetrics(registerer prometheus.Registerer) *GraphGatewayMetrics {
 	// How many CAR Fetch attempts we had? Need this to calculate % of various graph request types.
 	// We only count attempts here, because success/failure with/without retries are provided by caboose:
 	// - ipfs_caboose_fetch_duration_car_success_count
@@ -193,7 +206,7 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 		Name:      "car_fetch_attempts",
 		Help:      "The number of times a CAR fetch was attempted by IPFSBackend.",
 	})
-	prometheus.MustRegister(carFetchAttemptMetric)
+	registerer.MustRegister(carFetchAttemptMetric)
 
 	contextAlreadyCancelledMetric := prometheus.NewCounter(prometheus.CounterOpts{
 		Namespace: "ipfs",
@@ -201,7 +214,7 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 		Name:      "car_fetch_context_already_cancelled",
 		Help:      "The number of times context is already cancelled when a CAR fetch was attempted by IPFSBackend.",
 	})
-	prometheus.MustRegister(contextAlreadyCancelledMetric)
+	registerer.MustRegister(contextAlreadyCancelledMetric)
 
 	// How many blocks were read via CARs?
 	// Need this as a baseline to reason about error ratio vs raw_block_recovery_attempts.
@@ -211,7 +224,7 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 		Name:      "car_blocks_fetched",
 		Help:      "The number of blocks successfully read via CAR fetch.",
 	})
-	prometheus.MustRegister(carBlocksFetchedMetric)
+	registerer.MustRegister(carBlocksFetchedMetric)
 
 	// How many times CAR response was not enough or just failed, and we had to read a block via ?format=raw
 	// We only count attempts here, because success/failure with/without retries are provided by caboose:
@@ -225,7 +238,7 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 		Name:      "raw_block_recovery_attempts",
 		Help:      "The number of ?format=raw  block fetch attempts due to GraphGateway failure (CAR fetch error, missing block in CAR response, or a block evicted from cache too soon).",
 	})
-	prometheus.MustRegister(blockRecoveryAttemptMetric)
+	registerer.MustRegister(blockRecoveryAttemptMetric)
 
 	carParamsMetric := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "ipfs",
@@ -233,7 +246,7 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 		Name:      "car_fetch_params",
 		Help:      "How many times specific CAR parameter was used during CAR data fetch.",
 	}, []string{"dagScope", "entityRanges"}) // we use 'ranges' instead of 'bytes' here because we only count the number of ranges present
-	prometheus.MustRegister(carParamsMetric)
+	registerer.MustRegister(carParamsMetric)
 
 	bytesRangeStartMetric := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: "ipfs",
@@ -242,7 +255,7 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 		Help:      "Tracks where did the range request start.",
 		Buckets:   prometheus.ExponentialBuckets(1024, 2, 24), // 1024 bytes to 8 GiB
 	})
-	prometheus.MustRegister(bytesRangeStartMetric)
+	registerer.MustRegister(bytesRangeStartMetric)
 
 	bytesRangeSizeMetric := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Namespace: "ipfs",
@@ -251,7 +264,7 @@ func registerGraphGatewayMetrics() *GraphGatewayMetrics {
 		Help:      "Tracks the size of range requests.",
 		Buckets:   prometheus.ExponentialBuckets(256*1024, 2, 10), // From 256KiB to 100MiB
 	})
-	prometheus.MustRegister(bytesRangeSizeMetric)
+	registerer.MustRegister(bytesRangeSizeMetric)
 
 	return &GraphGatewayMetrics{
 		contextAlreadyCancelledMetric,

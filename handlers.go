@@ -104,7 +104,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 			return nil, err
 		}
 
-		gwAPI, err = lib.NewGraphGatewayBackend(bs.(lib.CarFetcher), exch, lib.WithValueStore(routing), lib.WithBlockstore(cacheBlockStore))
+		gwAPI, err = lib.NewGraphGatewayBackend(bs.(lib.CarFetcher), exch, lib.WithValueStore(routing), lib.WithBlockstore(cacheBlockStore), lib.WithPrometheusRegistry(prometheus.DefaultRegisterer))
 		if err != nil {
 			return nil, err
 		}
