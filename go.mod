@@ -3,7 +3,6 @@ module github.com/ipfs/bifrost-gateway
 go 1.19
 
 require (
-	github.com/cskr/pubsub v1.0.2
 	github.com/filecoin-saturn/caboose v0.0.3
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/golang-lru/v2 v2.0.1
@@ -21,7 +20,6 @@ require (
 	github.com/libp2p/go-libp2p-routing-helpers v0.7.0
 	github.com/mitchellh/go-server-timing v1.0.1
 	github.com/multiformats/go-multicodec v0.9.0
-	github.com/multiformats/go-multihash v0.2.3
 	github.com/prometheus/client_golang v1.15.1
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417
 	github.com/spf13/cobra v1.6.1
@@ -97,6 +95,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.8.0 // indirect
 	github.com/multiformats/go-multiaddr-dns v0.3.1 // indirect
 	github.com/multiformats/go-multibase v0.2.0 // indirect
+	github.com/multiformats/go-multihash v0.2.3 // indirect
 	github.com/multiformats/go-multistream v0.4.1 // indirect
 	github.com/multiformats/go-varint v0.0.7 // indirect
 	github.com/opencontainers/runtime-spec v1.0.3-0.20211123151946-c2389c3cb60a // indirect
