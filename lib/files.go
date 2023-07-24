@@ -70,7 +70,7 @@ func (b *backpressuredFile) Read(p []byte) (n int, err error) {
 	if err != nil {
 		return 0, err
 	}
-	nd, err := tv(b.ctx, b.fileCid, nil, nil, gateway.CarParams{Scope: gateway.DagScopeEntity, Range: &gateway.DagByteRange{From: from, To: b.byteRange.To}}, b.getLsys)
+	nd, err := loadTerminalUnixFSElementWithRecursiveDirectories(b.ctx, b.fileCid, nil, nil, gateway.CarParams{Scope: gateway.DagScopeEntity, Range: &gateway.DagByteRange{From: from, To: b.byteRange.To}}, b.getLsys)
 	if err != nil {
 		return 0, err
 	}
@@ -166,7 +166,7 @@ func (it *backpressuredFlatDirIter) Next() bool {
 			it.lsys, err = it.getLsys(it.ctx, c, params)
 			continue
 		}
-		nd, err = tv(it.ctx, c, nil, it.lsys, params, it.getLsys)
+		nd, err = loadTerminalUnixFSElementWithRecursiveDirectories(it.ctx, c, nil, it.lsys, params, it.getLsys)
 		if err != nil {
 			if err := it.ctx.Err(); err == nil {
 				retry, processedErr := isRetryableError(err)
@@ -184,16 +184,6 @@ func (it *backpressuredFlatDirIter) Next() bool {
 	it.curName = name
 	it.curFile = nd
 	return true
-
-	/*
-		Load link, figure out what it is:
-		1. If it's a symlink just stash it
-		2. If it's a raw block stash it?
-		3. If it's metadata then skip it
-		4. If it's a file return a wrapper around multireadcloser that waits for new lsys' to show up. There's got to be a way to feedback through the top requests for new lsys' along with the request we're waiting on for the retry
-		5. If it's a flat directory stash it (will need to carry the feedback layer for its children)
-		6. If it's a HAMT return an iterator that for "next" sends a request and waits for an lsys if there's a problem. Create the next object and return it passing through the request + response mechanisms for continuations
-	*/
 }
 
 func (it *backpressuredFlatDirIter) Err() error {
@@ -338,7 +328,7 @@ func (it *backpressuredHAMTDirIter) Next() bool {
 				continue
 			}
 
-			childNd, err = tv(it.ctx, c, nil, it.lsys, params, it.getLsys)
+			childNd, err = loadTerminalUnixFSElementWithRecursiveDirectories(it.ctx, c, nil, it.lsys, params, it.getLsys)
 			if err != nil {
 				continue
 			}
@@ -352,16 +342,6 @@ func (it *backpressuredHAMTDirIter) Next() bool {
 	}
 
 	return true
-
-	/*
-		Load link, figure out what it is:
-		1. If it's a symlink just stash it
-		2. If it's a raw block stash it?
-		3. If it's metadata then skip it
-		4. If it's a file return a wrapper around multireadcloser that waits for new lsys' to show up. There's got to be a way to feedback through the top requests for new lsys' along with the request we're waiting on for the retry
-		5. If it's a flat directory stash it (will need to carry the feedback layer for its children)
-		6. If it's a HAMT return an iterator that for "next" sends a request and waits for an lsys if there's a problem. Create the next object and return it passing through the request + response mechanisms for continuations
-	*/
 }
 
 func (it *backpressuredHAMTDirIter) Err() error {
@@ -438,7 +418,7 @@ func loadUnixFSBase(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld
 	}
 }
 
-func tv(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld.LinkSystem, params gateway.CarParams, getLsys lsysGetter) (files.Node, error) {
+func loadTerminalUnixFSElementWithRecursiveDirectories(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld.LinkSystem, params gateway.CarParams, getLsys lsysGetter) (files.Node, error) {
 	var err error
 	if lsys == nil {
 		lsys, err = getLsys(ctx, c, params)
