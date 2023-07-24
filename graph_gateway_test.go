@@ -155,11 +155,7 @@ func TestTar(t *testing.T) {
 	defer s.Close()
 
 	bs := newProxyBlockStore([]string{s.URL}, newCachedDNS(dnsCacheRefreshInterval))
-	exch, err := newExchange(bs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3}, exch)
+	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -351,11 +347,7 @@ func TestTarAtEndOfPath(t *testing.T) {
 	defer s.Close()
 
 	bs := newProxyBlockStore([]string{s.URL}, newCachedDNS(dnsCacheRefreshInterval))
-	exch, err := newExchange(bs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3}, exch)
+	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -533,11 +525,7 @@ func TestGetFile(t *testing.T) {
 	defer s.Close()
 
 	bs := newProxyBlockStore([]string{s.URL}, newCachedDNS(dnsCacheRefreshInterval))
-	exch, err := newExchange(bs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3}, exch)
+	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -654,11 +642,7 @@ func TestGetHAMTDirectory(t *testing.T) {
 	defer s.Close()
 
 	bs := newProxyBlockStore([]string{s.URL}, newCachedDNS(dnsCacheRefreshInterval))
-	exch, err := newExchange(bs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3}, exch)
+	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,11 +753,7 @@ func TestGetCAR(t *testing.T) {
 	defer s.Close()
 
 	bs := newProxyBlockStore([]string{s.URL}, newCachedDNS(dnsCacheRefreshInterval))
-	exch, err := newExchange(bs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3}, exch)
+	backend, err := lib.NewGraphGatewayBackend(&retryFetcher{inner: bs.(lib.CarFetcher), allowedRetries: 3, retriesRemaining: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
