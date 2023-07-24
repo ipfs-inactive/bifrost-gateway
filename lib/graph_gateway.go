@@ -14,14 +14,11 @@ import (
 	gopath "path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/filecoin-saturn/caboose"
-	blockstore "github.com/ipfs/boxo/blockstore"
 	nsopts "github.com/ipfs/boxo/coreiface/options/namesys"
 	ifacepath "github.com/ipfs/boxo/coreiface/path"
-	exchange "github.com/ipfs/boxo/exchange"
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/gateway"
 	carv2 "github.com/ipfs/boxo/ipld/car/v2"
@@ -68,7 +65,6 @@ type CarFetcher interface {
 type gwOptions struct {
 	ns           namesys.NameSystem
 	vs           routing.ValueStore
-	bs           blockstore.Blockstore
 	promRegistry prometheus.Registerer
 }
 
@@ -89,14 +85,6 @@ func WithValueStore(vs routing.ValueStore) GraphGatewayOption {
 	}
 }
 
-// WithBlockstore sets the Blockstore to use for the gateway
-func WithBlockstore(bs blockstore.Blockstore) GraphGatewayOption {
-	return func(opts *gwOptions) error {
-		opts.bs = bs
-		return nil
-	}
-}
-
 // WithPrometheusRegistry sets the registry to use for metrics collection
 func WithPrometheusRegistry(reg prometheus.Registerer) GraphGatewayOption {
 	return func(opts *gwOptions) error {
@@ -108,30 +96,26 @@ func WithPrometheusRegistry(reg prometheus.Registerer) GraphGatewayOption {
 type GraphGatewayOption func(gwOptions *gwOptions) error
 
 type GraphGateway struct {
-	fetcher      CarFetcher
-	blockFetcher exchange.Fetcher
-	routing      routing.ValueStore
-	namesys      namesys.NameSystem
-	bstore       blockstore.Blockstore
+	fetcher CarFetcher
+	routing routing.ValueStore
+	namesys namesys.NameSystem
 
 	pc traversal.LinkTargetNodePrototypeChooser
 
-	notifiers sync.Map // cid -> notifiersForRootCid
-	metrics   *GraphGatewayMetrics
+	metrics *GraphGatewayMetrics
 }
 
 type GraphGatewayMetrics struct {
 	contextAlreadyCancelledMetric prometheus.Counter
 	carFetchAttemptMetric         prometheus.Counter
 	carBlocksFetchedMetric        prometheus.Counter
-	blockRecoveryAttemptMetric    prometheus.Counter
 	carParamsMetric               *prometheus.CounterVec
 
 	bytesRangeStartMetric prometheus.Histogram
 	bytesRangeSizeMetric  prometheus.Histogram
 }
 
-func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ...GraphGatewayOption) (*GraphGateway, error) {
+func NewGraphGatewayBackend(f CarFetcher, opts ...GraphGatewayOption) (*GraphGateway, error) {
 	var compiledOptions gwOptions
 	for _, o := range opts {
 		if err := o(&compiledOptions); err != nil {
@@ -158,32 +142,16 @@ func NewGraphGatewayBackend(f CarFetcher, blockFetcher exchange.Fetcher, opts ..
 		}
 	}
 
-	bs := compiledOptions.bs
-	if compiledOptions.bs == nil {
-		// Sets up a cache to store blocks in
-		cbs, err := NewCacheBlockStore(DefaultCacheBlockStoreSize)
-		if err != nil {
-			return nil, err
-		}
-
-		// Set up support for identity hashes (https://github.com/ipfs/bifrost-gateway/issues/38)
-		cbs = blockstore.NewIdStore(cbs)
-		bs = cbs
-	}
-
 	var promReg prometheus.Registerer = prometheus.NewRegistry()
 	if compiledOptions.promRegistry != nil {
 		promReg = compiledOptions.promRegistry
 	}
 
 	return &GraphGateway{
-		fetcher:      f,
-		blockFetcher: blockFetcher,
-		routing:      vs,
-		namesys:      ns,
-		bstore:       bs,
-		notifiers:    sync.Map{},
-		metrics:      registerGraphGatewayMetrics(promReg),
+		fetcher: f,
+		routing: vs,
+		namesys: ns,
+		metrics: registerGraphGatewayMetrics(promReg),
 		pc: dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
 			if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
 				return tlnkNd.LinkTargetNodePrototype(), nil
@@ -226,20 +194,6 @@ func registerGraphGatewayMetrics(registerer prometheus.Registerer) *GraphGateway
 	})
 	registerer.MustRegister(carBlocksFetchedMetric)
 
-	// How many times CAR response was not enough or just failed, and we had to read a block via ?format=raw
-	// We only count attempts here, because success/failure with/without retries are provided by caboose:
-	// - ipfs_caboose_fetch_duration_block_success_count
-	// - ipfs_caboose_fetch_duration_block_failure_count
-	// - ipfs_caboose_fetch_duration_block_peer_success_count
-	// - ipfs_caboose_fetch_duration_block_peer_failure_count
-	blockRecoveryAttemptMetric := prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: "ipfs",
-		Subsystem: "gw_graph_backend",
-		Name:      "raw_block_recovery_attempts",
-		Help:      "The number of ?format=raw  block fetch attempts due to GraphGateway failure (CAR fetch error, missing block in CAR response, or a block evicted from cache too soon).",
-	})
-	registerer.MustRegister(blockRecoveryAttemptMetric)
-
 	carParamsMetric := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: "ipfs",
 		Subsystem: "gw_graph_backend",
@@ -270,7 +224,6 @@ func registerGraphGatewayMetrics(registerer prometheus.Registerer) *GraphGateway
 		contextAlreadyCancelledMetric,
 		carFetchAttemptMetric,
 		carBlocksFetchedMetric,
-		blockRecoveryAttemptMetric,
 		carParamsMetric,
 		bytesRangeStartMetric,
 		bytesRangeSizeMetric,
@@ -299,6 +252,7 @@ func (api *GraphGateway) fetchCAR(ctx context.Context, path gateway.ImmutablePat
 	paramsStr := paramsToString(params)
 	urlWithoutHost := fmt.Sprintf("/%s?%s", escapedPath, paramsStr)
 
+	api.metrics.carFetchAttemptMetric.Inc()
 	var ipldError error
 	fetchErr := api.fetcher.Fetch(ctx, urlWithoutHost, func(resource string, reader io.Reader) error {
 		return checkRetryableError(&ipldError, func() error {
@@ -479,22 +433,18 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 	case *backpressuredFile:
 		resp = gateway.NewGetResponseFromReader(typedTerminalElem, typedTerminalElem.size)
 	case *backpressuredHAMTDirIterNoRecursion:
-		iter, ok := terminalElem.(*backpressuredHAMTDirIterNoRecursion)
-		if !ok {
-		}
-
 		ch := make(chan unixfs.LinkResult)
 		go func() {
 			defer close(ch)
-			for iter.Next() {
-				l := iter.Link()
+			for typedTerminalElem.Next() {
+				l := typedTerminalElem.Link()
 				select {
 				case ch <- l:
 				case <-ctx.Done():
 					return
 				}
 			}
-			if err := iter.Err(); err != nil {
+			if err := typedTerminalElem.Err(); err != nil {
 				select {
 				case ch <- unixfs.LinkResult{Err: err}:
 				case <-ctx.Done():
@@ -502,7 +452,7 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 				}
 			}
 		}()
-		resp = gateway.NewGetResponseFromDirectoryListing(iter.dagSize, ch, nil)
+		resp = gateway.NewGetResponseFromDirectoryListing(typedTerminalElem.dagSize, ch, nil)
 	default:
 		return gateway.ContentPathMetadata{}, nil, fmt.Errorf("invalid data type")
 	}
