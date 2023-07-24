@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ipfs/boxo/exchange"
 	bsfetcher "github.com/ipfs/boxo/fetcher/impl/blockservice"
 	"github.com/ipfs/boxo/gateway"
 	"github.com/ipfs/boxo/ipld/car"
@@ -30,35 +29,6 @@ import (
 )
 
 type getBlock func(ctx context.Context, cid cid.Cid) (blocks.Block, error)
-
-type gbf struct {
-	fn getBlock
-}
-
-func (g *gbf) GetBlock(ctx context.Context, c cid.Cid) (blocks.Block, error) {
-	return g.fn(ctx, c)
-}
-
-func (g *gbf) GetBlocks(ctx context.Context, cids []cid.Cid) (<-chan blocks.Block, error) {
-	ch := make(chan blocks.Block, len(cids))
-	go func() {
-		defer close(ch)
-		for _, c := range cids {
-			blk, err := g.fn(ctx, c)
-			if err != nil {
-				return
-			}
-			select {
-			case ch <- blk:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return ch, nil
-}
-
-var _ exchange.Fetcher = (*gbf)(nil)
 
 func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *GraphGatewayMetrics) (getBlock, error) {
 	cr, err := car.NewCarReader(reader)

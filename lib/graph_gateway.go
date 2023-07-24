@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/hashicorp/go-multierror"
+	"github.com/ipfs/go-unixfsnode/hamt"
 	"github.com/ipld/go-ipld-prime/traversal"
 	"io"
 	"net/http"
@@ -300,8 +301,8 @@ func (api *GraphGateway) fetchCAR(ctx context.Context, path gateway.ImmutablePat
 }
 
 // resolvePathWithRootsAndBlock takes a path and linksystem and returns the set of non-terminal cids, the terminal cid, the remainder, and the block corresponding to the terminal cid
-func (api *GraphGateway) resolvePathWithRootsAndBlock(ctx context.Context, fpath ipfspath.Path, unixFSLsys *ipld.LinkSystem) ([]cid.Cid, cid.Cid, []string, blocks.Block, error) {
-	pathRootCids, terminalCid, remainder, terminalBlk, err := api.resolvePathToLastWithRoots(ctx, fpath, unixFSLsys)
+func resolvePathWithRootsAndBlock(ctx context.Context, fpath ipfspath.Path, unixFSLsys *ipld.LinkSystem) ([]cid.Cid, cid.Cid, []string, blocks.Block, error) {
+	pathRootCids, terminalCid, remainder, terminalBlk, err := resolvePathToLastWithRoots(ctx, fpath, unixFSLsys)
 	if err != nil {
 		return nil, cid.Undef, nil, nil, err
 	}
@@ -326,7 +327,7 @@ func (api *GraphGateway) resolvePathWithRootsAndBlock(ctx context.Context, fpath
 // the remainder pathing, the last block loaded, and the last node loaded.
 //
 // Note: the block returned will be nil if the terminal element is a link or the path is just a CID
-func (api *GraphGateway) resolvePathToLastWithRoots(ctx context.Context, fpath ipfspath.Path, unixFSLsys *ipld.LinkSystem) ([]cid.Cid, cid.Cid, []string, blocks.Block, error) {
+func resolvePathToLastWithRoots(ctx context.Context, fpath ipfspath.Path, unixFSLsys *ipld.LinkSystem) ([]cid.Cid, cid.Cid, []string, blocks.Block, error) {
 	c, p, err := ipfspath.SplitAbsPath(fpath)
 	if err != nil {
 		return nil, cid.Undef, nil, nil, err
@@ -342,10 +343,17 @@ func (api *GraphGateway) resolvePathToLastWithRoots(ctx context.Context, fpath i
 	var cids []cid.Cid
 	cids = append(cids, c)
 
+	pc := dagpb.AddSupportToChooser(func(lnk ipld.Link, lnkCtx ipld.LinkContext) (ipld.NodePrototype, error) {
+		if tlnkNd, ok := lnkCtx.LinkNode.(schema.TypedLinkNode); ok {
+			return tlnkNd.LinkTargetNodePrototype(), nil
+		}
+		return basicnode.Prototype.Any, nil
+	})
+
 	loadNode := func(ctx context.Context, c cid.Cid) (blocks.Block, ipld.Node, error) {
 		lctx := ipld.LinkContext{Ctx: ctx}
 		rootLnk := cidlink.Link{Cid: c}
-		np, err := api.pc(rootLnk, lctx)
+		np, err := pc(rootLnk, lctx)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -445,372 +453,360 @@ func (api *GraphGateway) Get(ctx context.Context, path gateway.ImmutablePath, by
 		}
 	}
 
-	p := ipfspath.FromString(path.String())
-
-	type terminalPathType struct {
-		resp *gateway.GetResponse
-		err  error
-		md   gateway.ContentPathMetadata
+	md, terminalElem, err := fetchWithPartialRetries(ctx, path, carParams, loadTerminalEntity, api.metrics, api.fetchCAR)
+	if err != nil {
+		return gateway.ContentPathMetadata{}, nil, err
 	}
 
-	terminalPathElementCh := make(chan terminalPathType, 1)
+	var resp *gateway.GetResponse
 
-	var terminalFile *multiReadCloser
-	var terminalDir chan unixfs.LinkResult
-	lastDirLinkNum := 0
-	hasSentAsyncData := false
-	go func() {
-		cctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		err := api.fetchCAR(cctx, path, carParams, func(resource string, reader io.Reader) error {
-			gb, err := carToLinearBlockGetter(cctx, reader, api.metrics)
-			if err != nil {
-				return err
-			}
+	switch typedTerminalElem := terminalElem.(type) {
+	case *gateway.GetResponse:
+		resp = typedTerminalElem
+	case *backpressuredFile:
+		resp = gateway.NewGetResponseFromReader(typedTerminalElem, typedTerminalElem.size)
+	case *backpressuredHAMTDirIterNoRecursion:
+		iter, ok := terminalElem.(*backpressuredHAMTDirIterNoRecursion)
+		if !ok {
+		}
 
-			lsys := getLinksystem(gb)
-			// First resolve the path since we always need to.
-			pathRootCids, terminalCid, remainder, terminalBlk, err := api.resolvePathWithRootsAndBlock(cctx, p, lsys)
-			if err != nil {
-				return err
-			}
-			md := contentMetadataFromRootsAndRemainder(p, pathRootCids, terminalCid, remainder)
-
-			lctx := ipld.LinkContext{Ctx: cctx}
-			pathTerminalCidLink := cidlink.Link{Cid: terminalCid}
-
-			if len(remainder) > 0 {
-				terminalPathElementCh <- terminalPathType{err: errNotUnixFS}
-				return nil
-			}
-
-			// From now on, dag-scope=entity!
-			// Since we need more of the graph load it to figure out what we have
-			// This includes determining if the terminal node is UnixFS or not
-			np, err := api.pc(pathTerminalCidLink, lctx)
-			if err != nil {
-				return err
-			}
-
-			decoder, err := lsys.DecoderChooser(pathTerminalCidLink)
-			if err != nil {
-				return err
-			}
-			nb := np.NewBuilder()
-			blockData := terminalBlk.RawData()
-			if err := decoder(nb, bytes.NewReader(blockData)); err != nil {
-				return err
-			}
-			lastCidNode := nb.Build()
-
-			if pbn, ok := lastCidNode.(dagpb.PBNode); !ok {
-				// If it's not valid dag-pb then we're done
-				terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromReader(files.NewBytesFile(blockData), int64(len(blockData))), md: md}
-				return nil
-			} else if len(remainder) > 0 {
-				// If we're trying to path into dag-pb node that's invalid and we're done
-				terminalPathElementCh <- terminalPathType{err: fmt.Errorf("cannot path into non-UnixFS dagpb")}
-				return nil
-			} else if !pbn.FieldData().Exists() {
-				// If it's not valid UnixFS then we're done
-				terminalPathElementCh <- terminalPathType{err: fmt.Errorf("not valid UnixFS")}
-				return nil
-			} else if unixfsFieldData, decodeErr := ufsData.DecodeUnixFSData(pbn.Data.Must().Bytes()); decodeErr != nil {
-				// If it's not valid dag-pb and UnixFS then we're done
-				terminalPathElementCh <- terminalPathType{err: fmt.Errorf("not valid UnixFS")}
-				return nil
-			} else {
-				switch fieldNum := unixfsFieldData.FieldDataType().Int(); fieldNum {
-				case ufsData.Data_Symlink:
-					fd := unixfsFieldData.FieldData()
-					if fd.Exists() {
-						lnkTarget := string(fd.Must().Bytes())
-						f := files.NewLinkFile(lnkTarget, nil)
-						s, ok := f.(*files.Symlink)
-						if !ok {
-							terminalPathElementCh <- terminalPathType{err: fmt.Errorf("should be unreachable: symlink does not have a symlink type")}
-							return nil
-						}
-						terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromSymlink(s, int64(len(lnkTarget))), md: md}
-						return nil
-					}
-					terminalPathElementCh <- terminalPathType{err: fmt.Errorf("UnixFS Symlink does not contain target")}
-					return nil
-				case ufsData.Data_Metadata:
-					terminalPathElementCh <- terminalPathType{err: fmt.Errorf("UnixFS Metadata unsupported")}
-					return nil
-				case ufsData.Data_HAMTShard, ufsData.Data_Directory:
-					blk, err := blocks.NewBlockWithCid(blockData, pathTerminalCidLink.Cid)
-					if err != nil {
-						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("could not create block: %w", err)}
-						return nil
-					}
-					dirRootNd, err := merkledag.ProtoNodeConverter(blk, lastCidNode)
-					if err != nil {
-						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("could not create dag-pb universal block from UnixFS directory root: %w", err)}
-						return nil
-					}
-					pn, ok := dirRootNd.(*merkledag.ProtoNode)
-					if !ok {
-						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("could not create dag-pb node from UnixFS directory root: %w", err)}
-						return nil
-					}
-
-					sz, err := pn.Size()
-					if err != nil {
-						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("could not get cumulative size from dag-pb node: %w", err)}
-						return nil
-					}
-
-					if terminalDir == nil {
-						terminalDir = make(chan unixfs.LinkResult)
-						terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromDirectoryListing(sz, terminalDir, nil), md: md}
-					}
-
-					dirLinkNum := 0
-					switch fieldNum {
-					case ufsData.Data_Directory:
-						iter := pbn.Links.Iterator()
-						for !iter.Done() {
-							_, v := iter.Next()
-							c := v.Hash.Link().(cidlink.Link).Cid
-							var name string
-							var size int64
-							if v.Name.Exists() {
-								name = v.Name.Must().String()
-							}
-							if v.Tsize.Exists() {
-								size = v.Tsize.Must().Int()
-							}
-							lnk := unixfs.LinkResult{Link: &format.Link{
-								Name: name,
-								Size: uint64(size),
-								Cid:  c,
-							}}
-
-							dirLinkNum++
-							if dirLinkNum-1 < lastDirLinkNum {
-								continue
-							}
-
-							select {
-							case terminalDir <- lnk:
-								lastDirLinkNum++
-							case <-cctx.Done():
-								// TODO: what here, send an error with another select?
-								return nil
-							}
-						}
-					case ufsData.Data_HAMTShard:
-						hasSentAsyncData = true
-						// Note: we are making up the entries
-						dirNd, err := unixfsnode.Reify(lctx, pbn, lsys)
-						if err != nil {
-							select {
-							case terminalDir <- unixfs.LinkResult{Err: fmt.Errorf("could not reify sharded directory: %w", err)}:
-							case <-cctx.Done():
-								// TODO: what here?
-							}
-							return nil
-						}
-
-						mi := dirNd.MapIterator()
-						for !mi.Done() {
-							k, v, err := mi.Next()
-							if err != nil {
-								return err
-							}
-							keyStr, err := k.AsString()
-							if err != nil {
-								select {
-								case terminalDir <- unixfs.LinkResult{Err: fmt.Errorf("could not interpret directory key as string: %w", err)}:
-								case <-cctx.Done():
-									// TODO: what here?
-								}
-								return nil
-							}
-							valLink, err := v.AsLink()
-							if err != nil {
-								select {
-								case terminalDir <- unixfs.LinkResult{Err: fmt.Errorf("could not interpret directory value as link: %w", err)}:
-								case <-cctx.Done():
-									// TODO: what here?
-								}
-								return nil
-							}
-							valCid := valLink.(cidlink.Link).Cid
-							lnk := unixfs.LinkResult{Link: &format.Link{
-								Name: keyStr,
-								Size: uint64(0),
-								Cid:  valCid,
-							}}
-
-							dirLinkNum++
-							if dirLinkNum-1 < lastDirLinkNum {
-								continue
-							}
-
-							select {
-							case terminalDir <- lnk:
-								lastDirLinkNum++
-							case <-cctx.Done():
-								// TODO: what here?
-							}
-						}
-					}
-					return nil
-				case ufsData.Data_Raw, ufsData.Data_File:
-					nd, err := unixfsnode.Reify(lctx, lastCidNode, lsys)
-					if err != nil {
-						return err
-					}
-
-					fnd, ok := nd.(datamodel.LargeBytesNode)
-					if !ok {
-						return fmt.Errorf("could not process file since it did not present as large bytes")
-					}
-					f, err := fnd.AsLargeBytes()
-					if err != nil {
-						return err
-					}
-
-					fileSize, err := f.Seek(0, io.SeekEnd)
-					if err != nil {
-						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("unable to get UnixFS file size: %w", err)}
-						return nil
-					}
-					_, err = f.Seek(0, io.SeekStart)
-					if err != nil {
-						terminalPathElementCh <- terminalPathType{err: fmt.Errorf("unable to get reset UnixFS file reader: %w", err)}
-						return nil
-					}
-
-					if terminalFile == nil {
-						mrc := &multiReadCloser{
-							closeFn:   nil,
-							mr:        f,
-							closed:    make(chan struct{}),
-							newReader: make(chan io.Reader),
-							retErr:    nil,
-							isClosed:  false,
-						}
-						terminalFile = mrc
-						terminalPathElementCh <- terminalPathType{resp: gateway.NewGetResponseFromReader(files.NewReaderFile(mrc), fileSize), md: md}
-						hasSentAsyncData = true
-					} else {
-						select {
-						case terminalFile.newReader <- f:
-						case <-cctx.Done():
-							// TODO: what here?
-							return nil
-						}
-					}
-
-					select {
-					case <-terminalFile.closed:
-						return nil
-					case <-cctx.Done():
-						// TODO: what here?
-					}
-					return nil
-				default:
-					terminalPathElementCh <- terminalPathType{err: fmt.Errorf("unknown UnixFS field type")}
-					return nil
-				}
-			}
-		})
-		if err != nil {
-			if !hasSentAsyncData {
-				terminalPathElementCh <- terminalPathType{err: fmt.Errorf("failed fetch: %w", err)}
-			} else if terminalFile != nil {
-				// TODO: this error should surface through the io.Reader
-			} else if terminalDir != nil {
+		ch := make(chan unixfs.LinkResult)
+		go func() {
+			defer close(ch)
+			for iter.Next() {
+				l := iter.Link()
 				select {
-				case terminalDir <- unixfs.LinkResult{Err: err}:
-				case <-cctx.Done():
-					// TODO: what here?
+				case ch <- l:
+				case <-ctx.Done():
+					return
 				}
+			}
+			if err := iter.Err(); err != nil {
+				select {
+				case ch <- unixfs.LinkResult{Err: err}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+		resp = gateway.NewGetResponseFromDirectoryListing(iter.dagSize, ch, nil)
+	default:
+		return gateway.ContentPathMetadata{}, nil, fmt.Errorf("invalid data type")
+	}
+
+	return md, resp, nil
+
+}
+
+// loadTerminalEntity returns either a [*gateway.GetResponse], [*backpressuredFile], or [*backpressuredHAMTDirIterNoRecursion]
+func loadTerminalEntity(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld.LinkSystem, params gateway.CarParams, getLsys lsysGetter) (interface{}, error) {
+	var err error
+	if lsys == nil {
+		lsys, err = getLsys(ctx, c, params)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	lctx := ipld.LinkContext{Ctx: ctx}
+
+	if c.Type() != uint64(multicodec.DagPb) {
+		var blockData []byte
+
+		if blk != nil {
+			blockData = blk.RawData()
+		} else {
+			blockData, err = lsys.LoadRaw(lctx, cidlink.Link{Cid: c})
+			if err != nil {
+				return nil, err
 			}
 		}
-		if terminalDir != nil {
-			close(terminalDir)
+
+		return gateway.NewGetResponseFromReader(files.NewBytesFile(blockData), int64(len(blockData))), nil
+	}
+
+	blockData, pbn, _, fieldNum, fieldDataBytes, err := loadUnixFSBase(ctx, c, blk, lsys)
+	if err != nil {
+		return nil, err
+	}
+
+	switch fieldNum {
+	case ufsData.Data_Symlink:
+		lnkTarget := string(fieldDataBytes)
+		f := gateway.NewGetResponseFromSymlink(files.NewLinkFile(lnkTarget, nil).(*files.Symlink), int64(len(fieldDataBytes)))
+		return f, nil
+	case ufsData.Data_Metadata:
+		return nil, fmt.Errorf("UnixFS Metadata unsupported")
+	case ufsData.Data_HAMTShard, ufsData.Data_Directory:
+		blk, err := blocks.NewBlockWithCid(blockData, c)
+		if err != nil {
+			return nil, fmt.Errorf("could not create block: %w", err)
+		}
+		dirRootNd, err := merkledag.ProtoNodeConverter(blk, pbn)
+		if err != nil {
+			return nil, fmt.Errorf("could not create dag-pb universal block from UnixFS directory root: %w", err)
+		}
+		pn, ok := dirRootNd.(*merkledag.ProtoNode)
+		if !ok {
+			return nil, fmt.Errorf("could not create dag-pb node from UnixFS directory root: %w", err)
+		}
+
+		dirDagSize, err := pn.Size()
+		if err != nil {
+			return nil, fmt.Errorf("could not get cumulative size from dag-pb node: %w", err)
+		}
+
+		switch fieldNum {
+		case ufsData.Data_Directory:
+			ch := make(chan unixfs.LinkResult, pbn.Links.Length())
+			defer close(ch)
+			iter := pbn.Links.Iterator()
+			for !iter.Done() {
+				_, v := iter.Next()
+				c := v.Hash.Link().(cidlink.Link).Cid
+				var name string
+				var size int64
+				if v.Name.Exists() {
+					name = v.Name.Must().String()
+				}
+				if v.Tsize.Exists() {
+					size = v.Tsize.Must().Int()
+				}
+				lnk := unixfs.LinkResult{Link: &format.Link{
+					Name: name,
+					Size: uint64(size),
+					Cid:  c,
+				}}
+				ch <- lnk
+			}
+			return gateway.NewGetResponseFromDirectoryListing(dirDagSize, ch, nil), nil
+		case ufsData.Data_HAMTShard:
+			dirNd, err := unixfsnode.Reify(lctx, pbn, lsys)
+			if err != nil {
+				return nil, fmt.Errorf("could not reify sharded directory: %w", err)
+			}
+
+			d := &backpressuredHAMTDirIterNoRecursion{
+				dagSize:   dirDagSize,
+				linksItr:  dirNd.MapIterator(),
+				dirCid:    c,
+				lsys:      lsys,
+				getLsys:   getLsys,
+				ctx:       ctx,
+				closed:    make(chan error),
+				hasClosed: false,
+			}
+			return d, nil
+		default:
+			return nil, fmt.Errorf("not a basic or HAMT directory: should be unreachable")
+		}
+	case ufsData.Data_Raw, ufsData.Data_File:
+		nd, err := unixfsnode.Reify(lctx, pbn, lsys)
+		if err != nil {
+			return nil, err
+		}
+
+		fnd, ok := nd.(datamodel.LargeBytesNode)
+		if !ok {
+			return nil, fmt.Errorf("could not process file since it did not present as large bytes")
+		}
+		f, err := fnd.AsLargeBytes()
+		if err != nil {
+			return nil, err
+		}
+
+		fileSize, err := f.Seek(0, io.SeekEnd)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get UnixFS file size: %w", err)
+		}
+
+		from := int64(0)
+		if params.Range != nil {
+			from = params.Range.From
+		}
+		_, err = f.Seek(from, io.SeekStart)
+		if err != nil {
+			return nil, fmt.Errorf("unable to get reset UnixFS file reader: %w", err)
+		}
+
+		return &backpressuredFile{ctx: ctx, fileCid: c, size: fileSize, f: f, getLsys: getLsys, closed: make(chan error)}, nil
+	default:
+		return nil, fmt.Errorf("unknown UnixFS field type")
+	}
+}
+
+type backpressuredHAMTDirIterNoRecursion struct {
+	dagSize  uint64
+	linksItr ipld.MapIterator
+	dirCid   cid.Cid
+
+	lsys    *ipld.LinkSystem
+	getLsys lsysGetter
+	ctx     context.Context
+
+	curLnk       unixfs.LinkResult
+	curProcessed int
+
+	closed    chan error
+	hasClosed bool
+	err       error
+}
+
+func (it *backpressuredHAMTDirIterNoRecursion) AwaitClose() <-chan error {
+	return it.closed
+}
+
+func (it *backpressuredHAMTDirIterNoRecursion) Link() unixfs.LinkResult {
+	return it.curLnk
+}
+
+func (it *backpressuredHAMTDirIterNoRecursion) Next() bool {
+	defer func() {
+		if it.linksItr.Done() || it.err != nil {
+			if !it.hasClosed {
+				it.hasClosed = true
+				close(it.closed)
+			}
 		}
 	}()
 
-	select {
-	case t := <-terminalPathElementCh:
-		if t.err != nil {
-			return gateway.ContentPathMetadata{}, nil, t.err
+	if it.err != nil {
+		return false
+	}
+
+	iter := it.linksItr
+	if iter.Done() {
+		return false
+	}
+
+	/*
+		Since there is no way to make a graph request for part of a HAMT during errors we can either fill in the HAMT with
+		block requests, or we can re-request the HAMT and skip over the parts we already have.
+
+		Here we choose the latter, however in the event of a re-request we request the entity rather than the entire DAG as
+		a compromise between more requests and over-fetching data.
+	*/
+
+	var err error
+	for {
+		if it.ctx.Err() != nil {
+			it.err = it.ctx.Err()
+			return false
 		}
 
-		return t.md, t.resp, nil
-	case <-ctx.Done():
-		return gateway.ContentPathMetadata{}, nil, ctx.Err()
-	}
-}
-
-type multiReadCloser struct {
-	closeFn   func() error
-	mr        io.Reader
-	closed    chan struct{}
-	newReader chan io.Reader
-	retErr    error
-	isClosed  bool
-}
-
-func (r *multiReadCloser) Read(p []byte) (n int, err error) {
-	if r.retErr == nil {
-		n, err = r.mr.Read(p)
-		if err == nil || err == io.EOF {
-			return n, err
+		retry, processedErr := isRetryableError(err)
+		if !retry {
+			it.err = processedErr
+			return false
 		}
 
-		if n > 0 {
-			r.retErr = err
-			return n, nil
+		var nd ipld.Node
+		if err != nil {
+			var lsys *ipld.LinkSystem
+			lsys, err = it.getLsys(it.ctx, it.dirCid, gateway.CarParams{Scope: gateway.DagScopeEntity})
+			if err != nil {
+				continue
+			}
+
+			_, pbn, fieldData, _, _, ufsBaseErr := loadUnixFSBase(it.ctx, it.dirCid, nil, lsys)
+			if ufsBaseErr != nil {
+				err = ufsBaseErr
+				continue
+			}
+
+			nd, err = hamt.NewUnixFSHAMTShard(it.ctx, pbn, fieldData, lsys)
+			if err != nil {
+				err = fmt.Errorf("could not reify sharded directory: %w", err)
+				continue
+			}
+
+			iter = nd.MapIterator()
+			for i := 0; i < it.curProcessed; i++ {
+				_, _, err = iter.Next()
+				if err != nil {
+					continue
+				}
+			}
+
+			it.linksItr = iter
 		}
-	} else {
-		err = r.retErr
+
+		var k, v ipld.Node
+		k, v, err = iter.Next()
+		if err != nil {
+			retry, processedErr = isRetryableError(err)
+			if retry {
+				err = processedErr
+				continue
+			}
+			it.err = processedErr
+			return false
+		}
+
+		var name string
+		name, err = k.AsString()
+		if err != nil {
+			it.err = err
+			return false
+		}
+		var lnk ipld.Link
+		lnk, err = v.AsLink()
+		if err != nil {
+			it.err = err
+			return false
+		}
+
+		cl, ok := lnk.(cidlink.Link)
+		if !ok {
+			it.err = fmt.Errorf("link not a cidlink")
+			return false
+		}
+
+		c := cl.Cid
+
+		it.curLnk = unixfs.LinkResult{
+			Link: &format.Link{
+				Name: name,
+				Size: 0,
+				Cid:  c,
+			},
+		}
+		it.curProcessed++
+		break
 	}
 
-	select {
-	case <-r.closed:
-		return n, err
-	case newReader, ok := <-r.newReader:
-		if ok {
-			r.mr = io.MultiReader(r.mr, newReader)
-			return r.Read(p)
-		}
-		return n, err
-	}
+	return true
 }
 
-func (r *multiReadCloser) Close() error {
-	if r.isClosed {
-		return nil
-	}
-
-	close(r.newReader)
-	close(r.closed)
-
-	if r.closeFn == nil {
-		return nil
-	}
-	return r.closeFn()
+func (it *backpressuredHAMTDirIterNoRecursion) Err() error {
+	return it.err
 }
 
-var _ io.ReadCloser = (*multiReadCloser)(nil)
+var _ AwaitCloser = (*backpressuredHAMTDirIterNoRecursion)(nil)
 
 func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath) (gateway.ContentPathMetadata, files.Node, error) {
 	api.metrics.carParamsMetric.With(prometheus.Labels{"dagScope": "all", "entityRanges": "0"}).Inc()
+	return fetchWithPartialRetries(ctx, path, gateway.CarParams{Scope: gateway.DagScopeAll}, loadTerminalUnixFSElementWithRecursiveDirectories, api.metrics, api.fetchCAR)
+}
 
-	type terminalPathType struct {
-		resp files.Node
-		err  error
-		md   gateway.ContentPathMetadata
-	}
+type loadTerminalElement[T any] func(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld.LinkSystem, params gateway.CarParams, getLsys lsysGetter) (T, error)
+type fetchCarFn = func(ctx context.Context, path gateway.ImmutablePath, params gateway.CarParams, cb DataCallback) error
 
-	terminalPathElementCh := make(chan terminalPathType, 1)
+type terminalPathType[T any] struct {
+	resp T
+	err  error
+	md   gateway.ContentPathMetadata
+}
+
+type nextReq struct {
+	c      cid.Cid
+	params gateway.CarParams
+}
+
+func fetchWithPartialRetries[T any](ctx context.Context, path gateway.ImmutablePath, initialParams gateway.CarParams, resolveTerminalElementFn loadTerminalElement[T], metrics *GraphGatewayMetrics, fetchCAR fetchCarFn) (gateway.ContentPathMetadata, T, error) {
+	var zeroReturnType T
+
+	terminalPathElementCh := make(chan terminalPathType[T], 1)
 
 	go func() {
 		cctx, cancel := context.WithCancel(ctx)
@@ -818,11 +814,6 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 
 		hasSentAsyncData := false
 		var closeCh <-chan error
-
-		type nextReq struct {
-			c      cid.Cid
-			params gateway.CarParams
-		}
 
 		sendRequest := make(chan nextReq, 1)
 		sendResponse := make(chan *ipld.LinkSystem, 1)
@@ -842,10 +833,10 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 		}
 
 		p := ipfspath.FromString(path.String())
-		params := gateway.CarParams{Scope: gateway.DagScopeAll}
+		params := initialParams
 
-		err := api.fetchCAR(cctx, path, params, func(resource string, reader io.Reader) error {
-			gb, err := carToLinearBlockGetter(cctx, reader, api.metrics)
+		err := fetchCAR(cctx, path, params, func(resource string, reader io.Reader) error {
+			gb, err := carToLinearBlockGetter(cctx, reader, metrics)
 			if err != nil {
 				return err
 			}
@@ -853,7 +844,7 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 			lsys := getLinksystem(gb)
 
 			if hasSentAsyncData {
-				_, _, _, _, err = api.resolvePathToLastWithRoots(cctx, p, lsys)
+				_, _, _, _, err = resolvePathToLastWithRoots(cctx, p, lsys)
 				if err != nil {
 					return err
 				}
@@ -865,14 +856,14 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 				}
 			} else {
 				// First resolve the path since we always need to.
-				pathRootCids, terminalCid, remainder, terminalBlk, err := api.resolvePathWithRootsAndBlock(cctx, p, lsys)
+				pathRootCids, terminalCid, remainder, terminalBlk, err := resolvePathWithRootsAndBlock(cctx, p, lsys)
 				if err != nil {
 					return err
 				}
 				md := contentMetadataFromRootsAndRemainder(p, pathRootCids, terminalCid, remainder)
 
 				if len(remainder) > 0 {
-					terminalPathElementCh <- terminalPathType{err: errNotUnixFS}
+					terminalPathElementCh <- terminalPathType[T]{err: errNotUnixFS}
 					return nil
 				}
 
@@ -884,14 +875,14 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 					}
 				}
 
-				nd, err := tv(cctx, terminalCid, terminalBlk, lsys, params, getLsys)
+				nd, err := resolveTerminalElementFn(cctx, terminalCid, terminalBlk, lsys, params, getLsys)
 				if err != nil {
 					return err
 				}
 
-				ndAc, ok := nd.(AwaitCloser)
+				ndAc, ok := any(nd).(AwaitCloser)
 				if !ok {
-					terminalPathElementCh <- terminalPathType{
+					terminalPathElementCh <- terminalPathType[T]{
 						resp: nd,
 						md:   md,
 					}
@@ -899,7 +890,7 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 				}
 
 				hasSentAsyncData = true
-				terminalPathElementCh <- terminalPathType{
+				terminalPathElementCh <- terminalPathType[T]{
 					resp: nd,
 					md:   md,
 				}
@@ -922,7 +913,7 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 		})
 
 		if !hasSentAsyncData && err != nil {
-			terminalPathElementCh <- terminalPathType{err: err}
+			terminalPathElementCh <- terminalPathType[T]{err: err}
 			return
 		}
 
@@ -946,11 +937,11 @@ func (api *GraphGateway) GetAll(ctx context.Context, path gateway.ImmutablePath)
 	select {
 	case t := <-terminalPathElementCh:
 		if t.err != nil {
-			return gateway.ContentPathMetadata{}, nil, t.err
+			return gateway.ContentPathMetadata{}, zeroReturnType, t.err
 		}
 		return t.md, t.resp, nil
 	case <-ctx.Done():
-		return gateway.ContentPathMetadata{}, nil, ctx.Err()
+		return gateway.ContentPathMetadata{}, zeroReturnType, ctx.Err()
 	}
 }
 
@@ -969,7 +960,7 @@ func (api *GraphGateway) GetBlock(ctx context.Context, path gateway.ImmutablePat
 		lsys := getLinksystem(gb)
 
 		// First resolve the path since we always need to.
-		pathRoots, terminalCid, remainder, terminalBlk, err := api.resolvePathToLastWithRoots(ctx, p, lsys)
+		pathRoots, terminalCid, remainder, terminalBlk, err := resolvePathToLastWithRoots(ctx, p, lsys)
 		if err != nil {
 			return err
 		}
@@ -1020,7 +1011,7 @@ func (api *GraphGateway) Head(ctx context.Context, path gateway.ImmutablePath) (
 		lsys := getLinksystem(gb)
 
 		// First resolve the path since we always need to.
-		pathRoots, terminalCid, remainder, terminalBlk, err := api.resolvePathWithRootsAndBlock(ctx, p, lsys)
+		pathRoots, terminalCid, remainder, terminalBlk, err := resolvePathWithRootsAndBlock(ctx, p, lsys)
 		if err != nil {
 			return err
 		}
@@ -1153,7 +1144,7 @@ func (api *GraphGateway) ResolvePath(ctx context.Context, path gateway.Immutable
 
 		// First resolve the path since we always need to.
 		p := ipfspath.FromString(path.String())
-		pathRoots, terminalCid, remainder, _, err := api.resolvePathToLastWithRoots(ctx, p, lsys)
+		pathRoots, terminalCid, remainder, _, err := resolvePathToLastWithRoots(ctx, p, lsys)
 		if err != nil {
 			return err
 		}
@@ -1215,7 +1206,7 @@ func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath,
 			l := getLinksystem(teeBlock)
 
 			// First resolve the path since we always need to.
-			_, terminalCid, remainder, terminalBlk, err := api.resolvePathWithRootsAndBlock(ctx, p, l)
+			_, terminalCid, remainder, terminalBlk, err := resolvePathWithRootsAndBlock(ctx, p, l)
 			if err != nil {
 				return err
 			}
