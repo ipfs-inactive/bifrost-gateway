@@ -66,21 +66,39 @@ func (b *backpressuredFile) Read(p []byte) (n int, err error) {
 		err = b.retErr
 	}
 
-	from, err := b.f.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return 0, err
-	}
-	nd, err := loadTerminalUnixFSElementWithRecursiveDirectories(b.ctx, b.fileCid, nil, nil, gateway.CarParams{Scope: gateway.DagScopeEntity, Range: &gateway.DagByteRange{From: from, To: b.byteRange.To}}, b.getLsys)
-	if err != nil {
-		return 0, err
+	from, seekErr := b.f.Seek(0, io.SeekCurrent)
+	if seekErr != nil {
+		// Return the seek error since by this point seeking failures like this should be impossible
+		return 0, seekErr
 	}
 
-	f, ok := nd.(files.File)
-	if !ok {
-		return 0, fmt.Errorf("not a file, should be unreachable")
+	// we had an error while reading so attempt to reset the underlying reader
+	for {
+		if b.ctx.Err() != nil {
+			return 0, b.ctx.Err()
+		}
+
+		retry, processedErr := isRetryableError(err)
+		if !retry {
+			return 0, processedErr
+		}
+
+		var nd files.Node
+		nd, err = loadTerminalUnixFSElementWithRecursiveDirectories(b.ctx, b.fileCid, nil, nil, gateway.CarParams{Scope: gateway.DagScopeEntity, Range: &gateway.DagByteRange{From: from, To: b.byteRange.To}}, b.getLsys)
+		if err != nil {
+			continue
+		}
+
+		f, ok := nd.(files.File)
+		if !ok {
+			return 0, fmt.Errorf("not a file, should be unreachable")
+		}
+
+		b.f = f
+		break
 	}
 
-	b.f = f
+	// now that we've reset the reader try reading again
 	return b.Read(p)
 }
 
@@ -168,15 +186,16 @@ func (it *backpressuredFlatDirIter) Next() bool {
 		}
 		nd, err = loadTerminalUnixFSElementWithRecursiveDirectories(it.ctx, c, nil, it.lsys, params, it.getLsys)
 		if err != nil {
-			if err := it.ctx.Err(); err == nil {
-				retry, processedErr := isRetryableError(err)
-				if retry {
-					err = processedErr
-					continue
-				}
-				it.err = processedErr
-				return false
+			if ctxErr := it.ctx.Err(); ctxErr != nil {
+				continue
 			}
+			retry, processedErr := isRetryableError(err)
+			if retry {
+				err = processedErr
+				continue
+			}
+			it.err = processedErr
+			return false
 		}
 		break
 	}
