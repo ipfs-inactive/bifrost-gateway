@@ -714,11 +714,27 @@ func TestGetHAMTDirectory(t *testing.T) {
 			if err := sendBlocks(ctx, dirWithMultiblockHAMTandFiles, writer, []string{
 				"bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi", // root dir
 				"bafybeignui4g7l6cvqyy4t6vnbl2fjtego4ejmpcia77jhhwnksmm4bejm", // hamt root
+				"bafybeiccgo7euew77gkqkhezn3pozfrciiibqz2u3spdqmgjvd5wqskipm", // inner hamt nodes start here
 			}); err != nil {
 				panic(err)
 			}
-
 		case 3:
+			// Expect a request for a non-existent index.html file
+			// Note: this is an implementation detail related to the directory request above
+			// Note: the order of cases 3 and 4 here are implementation specific as well
+			expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir//index.html"
+			if request.URL.Path != expectedUri {
+				panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
+			}
+
+			if err := sendBlocks(ctx, dirWithMultiblockHAMTandFiles, writer, []string{
+				"bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi", // root dir
+				"bafybeignui4g7l6cvqyy4t6vnbl2fjtego4ejmpcia77jhhwnksmm4bejm", // hamt root
+				"bafybeiccgo7euew77gkqkhezn3pozfrciiibqz2u3spdqmgjvd5wqskipm", // inner hamt nodes start here
+			}); err != nil {
+				panic(err)
+			}
+		case 4:
 			// Expect a request for the full HAMT and return it
 			// Note: this is an implementation detail, it could be in the future that we request more or less data
 			// (e.g. ask for the full path, ask for index.html first, make a spec change to allow asking for index.html with a fallback to the directory, etc.)
@@ -731,21 +747,6 @@ func TestGetHAMTDirectory(t *testing.T) {
 				"bafybeignui4g7l6cvqyy4t6vnbl2fjtego4ejmpcia77jhhwnksmm4bejm", // hamt root
 				"bafybeiccgo7euew77gkqkhezn3pozfrciiibqz2u3spdqmgjvd5wqskipm", // inner hamt nodes start here
 				"bafybeihjydob4eq5j4m43whjgf5cgftthc42kjno3g24sa3wcw7vonbmfy",
-			}); err != nil {
-				panic(err)
-			}
-		case 4:
-			// Expect a request for a non-existent index.html file
-			// Note: this is an implementation detail related to the directory request above
-			expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir//index.html"
-			if request.URL.Path != expectedUri {
-				panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
-			}
-
-			if err := sendBlocks(ctx, dirWithMultiblockHAMTandFiles, writer, []string{
-				"bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi", // root dir
-				"bafybeignui4g7l6cvqyy4t6vnbl2fjtego4ejmpcia77jhhwnksmm4bejm", // hamt root
-				"bafybeiccgo7euew77gkqkhezn3pozfrciiibqz2u3spdqmgjvd5wqskipm", // inner hamt nodes start here
 			}); err != nil {
 				panic(err)
 			}
