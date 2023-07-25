@@ -248,9 +248,10 @@ func paramsToString(params gateway.CarParams) string {
 }
 
 func (api *GraphGateway) fetchCAR(ctx context.Context, path gateway.ImmutablePath, params gateway.CarParams, cb DataCallback) error {
-	escapedPath := url.PathEscape(path.String()[1:])
+	escapedPath := url.PathEscape(path.String())
+	escapedPath = strings.ReplaceAll(escapedPath, "%2F", "/")
 	paramsStr := paramsToString(params)
-	urlWithoutHost := fmt.Sprintf("/%s?%s", escapedPath, paramsStr)
+	urlWithoutHost := fmt.Sprintf("%s?%s", escapedPath, paramsStr)
 
 	api.metrics.carFetchAttemptMetric.Inc()
 	var ipldError error
