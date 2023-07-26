@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	gopath "path"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/go-multierror"
+	"github.com/ipfs/go-unixfsnode/hamt"
+	"github.com/ipld/go-ipld-prime/traversal"
 
 	"github.com/filecoin-saturn/caboose"
 	"github.com/hashicorp/go-multierror"
@@ -230,28 +233,8 @@ func registerGraphGatewayMetrics(registerer prometheus.Registerer) *GraphGateway
 	}
 }
 
-func paramsToString(params gateway.CarParams) string {
-	paramsBuilder := strings.Builder{}
-	paramsBuilder.WriteString("dag-scope=")
-	paramsBuilder.WriteString(string(params.Scope))
-	if params.Range != nil {
-		paramsBuilder.WriteString("&entity-bytes=")
-		paramsBuilder.WriteString(strconv.FormatInt(params.Range.From, 10))
-		paramsBuilder.WriteString(":")
-		if params.Range.To != nil {
-			paramsBuilder.WriteString(strconv.FormatInt(*params.Range.To, 10))
-		} else {
-			paramsBuilder.WriteString("*")
-		}
-	}
-	return paramsBuilder.String()
-}
-
 func (api *GraphGateway) fetchCAR(ctx context.Context, path gateway.ImmutablePath, params gateway.CarParams, cb DataCallback) error {
-	escapedPath := url.PathEscape(path.String())
-	escapedPath = strings.ReplaceAll(escapedPath, "%2F", "/")
-	paramsStr := paramsToString(params)
-	urlWithoutHost := fmt.Sprintf("%s?%s", escapedPath, paramsStr)
+	urlWithoutHost := contentPathToCarUrl(path, params).String()
 
 	api.metrics.carFetchAttemptMetric.Inc()
 	var ipldError error
@@ -866,11 +849,15 @@ func fetchWithPartialRetries[T any](ctx context.Context, path gateway.ImmutableP
 			case closeErr := <-closeCh:
 				return closeErr
 			case req := <-sendRequest:
-				requestStr := fmt.Sprintf("/ipfs/%s?%s", req.c.String(), paramsToString(req.params))
 				// set path and params for next iteration
 				p = ipfspath.FromCid(req.c)
+				imPath, err := gateway.NewImmutablePath(ifacepath.New(p.String()))
+				if err != nil {
+					return err
+				}
 				params = req.params
-				return &ErrPartialResponse{StillNeed: []string{requestStr}}
+				remainderUrl := contentPathToCarUrl(imPath, params).String()
+				return &ErrPartialResponse{StillNeed: []string{remainderUrl}}
 			case <-cctx.Done():
 				return cctx.Err()
 			}

@@ -328,7 +328,7 @@ func TestTarAtEndOfPath(t *testing.T) {
 			}
 		case 6:
 			// Expect a request for the rest of the multiblock file in the directory and give it
-			expectedUri := "/ipfs/bafybeigcisqd7m5nf3qmuvjdbakl5bdnh4ocrmacaqkpuh77qjvggmt2sa?dag-scope=entity&entity-bytes=768:*"
+			expectedUri := "/ipfs/bafybeigcisqd7m5nf3qmuvjdbakl5bdnh4ocrmacaqkpuh77qjvggmt2sa?format=car&dag-scope=entity&entity-bytes=768:*"
 			if request.RequestURI != expectedUri {
 				panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
 			}
