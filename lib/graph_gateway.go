@@ -564,15 +564,17 @@ func loadTerminalEntity(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *
 		}
 
 		from := int64(0)
+		var byteRange gateway.DagByteRange
 		if params.Range != nil {
 			from = params.Range.From
+			byteRange = *params.Range
 		}
 		_, err = f.Seek(from, io.SeekStart)
 		if err != nil {
 			return nil, fmt.Errorf("unable to get reset UnixFS file reader: %w", err)
 		}
 
-		return &backpressuredFile{ctx: ctx, fileCid: c, size: fileSize, f: f, getLsys: getLsys, closed: make(chan error)}, nil
+		return &backpressuredFile{ctx: ctx, fileCid: c, byteRange: byteRange, size: fileSize, f: f, getLsys: getLsys, closed: make(chan error)}, nil
 	default:
 		return nil, fmt.Errorf("unknown UnixFS field type")
 	}

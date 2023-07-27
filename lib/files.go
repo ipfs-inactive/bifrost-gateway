@@ -513,7 +513,9 @@ func loadTerminalUnixFSElementWithRecursiveDirectories(ctx context.Context, c ci
 		}
 
 		from := int64(0)
+		var byteRange gateway.DagByteRange
 		if params.Range != nil {
+			byteRange = *params.Range
 			from = params.Range.From
 		}
 		_, err = f.Seek(from, io.SeekStart)
@@ -521,7 +523,7 @@ func loadTerminalUnixFSElementWithRecursiveDirectories(ctx context.Context, c ci
 			return nil, fmt.Errorf("unable to get reset UnixFS file reader: %w", err)
 		}
 
-		return &backpressuredFile{ctx: ctx, fileCid: c, size: fileSize, f: f, getLsys: getLsys, closed: make(chan error)}, nil
+		return &backpressuredFile{ctx: ctx, fileCid: c, byteRange: byteRange, size: fileSize, f: f, getLsys: getLsys, closed: make(chan error)}, nil
 	default:
 		return nil, fmt.Errorf("unknown UnixFS field type")
 	}
