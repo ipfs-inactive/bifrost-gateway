@@ -94,7 +94,7 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 		if blkRead.block != nil {
 			metrics.carBlocksFetchedMetric.Inc()
 			if !blkRead.block.Cid().Equals(c) {
-				return nil, fmt.Errorf("unexpected block received")
+				return nil, fmt.Errorf("unexpected block received: expected %s, got %s", c, blkRead.block.Cid())
 			}
 			return blkRead.block, nil
 		}
