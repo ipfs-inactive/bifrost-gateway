@@ -853,7 +853,7 @@ func fetchWithPartialRetries[T any](ctx context.Context, path gateway.ImmutableP
 				}
 				params = req.params
 				remainderUrl := contentPathToCarUrl(imPath, params).String()
-				return &ErrPartialResponse{StillNeed: []string{remainderUrl}}
+				return ErrPartialResponse{StillNeed: []string{remainderUrl}}
 			case <-cctx.Done():
 				return cctx.Err()
 			}

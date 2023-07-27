@@ -951,7 +951,7 @@ func (r *retryFetcher) Fetch(ctx context.Context, path string, cb lib.DataCallba
 	}
 
 	switch t := err.(type) {
-	case *lib.ErrPartialResponse:
+	case lib.ErrPartialResponse:
 		if len(t.StillNeed) > 1 {
 			panic("only a single request at a time supported")
 		}
