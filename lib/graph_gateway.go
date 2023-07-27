@@ -12,10 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hashicorp/go-multierror"
-	"github.com/ipfs/go-unixfsnode/hamt"
-	"github.com/ipld/go-ipld-prime/traversal"
-
 	"github.com/filecoin-saturn/caboose"
 	"github.com/hashicorp/go-multierror"
 	nsopts "github.com/ipfs/boxo/coreiface/options/namesys"
