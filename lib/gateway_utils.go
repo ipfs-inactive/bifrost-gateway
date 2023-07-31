@@ -1,10 +1,15 @@
 package lib
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/filecoin-saturn/caboose"
 	"github.com/ipfs/boxo/gateway"
 )
 
@@ -36,4 +41,33 @@ func carParamsToString(params gateway.CarParams) string {
 		}
 	}
 	return paramsBuilder.String()
+}
+
+// GatewayError translates underlying blockstore error into one that gateway code will return as HTTP 502 or 504
+// it also makes sure Retry-After hint from remote blockstore will be passed to HTTP client, if present.
+func GatewayError(err error) error {
+	if errors.Is(err, &gateway.ErrorStatusCode{}) ||
+		errors.Is(err, &gateway.ErrorRetryAfter{}) {
+		// already correct error
+		return err
+	}
+
+	// All timeouts should produce 504 Gateway Timeout
+	if errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, caboose.ErrSaturnTimeout) ||
+		// Unfortunately this is not an exported type so we have to check for the content.
+		strings.Contains(err.Error(), "Client.Timeout exceeded") {
+		return fmt.Errorf("%w: %s", gateway.ErrGatewayTimeout, err.Error())
+	}
+
+	// (Saturn) errors that support the RetryAfter interface need to be converted
+	// to the correct gateway error, such that the HTTP header is set.
+	for v := err; v != nil; v = errors.Unwrap(v) {
+		if r, ok := v.(interface{ RetryAfter() time.Duration }); ok {
+			return gateway.NewErrorRetryAfter(err, r.RetryAfter())
+		}
+	}
+
+	// everything else returns 502 Bad Gateway
+	return fmt.Errorf("%w: %s", gateway.ErrBadGateway, err.Error())
 }

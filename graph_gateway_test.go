@@ -1063,6 +1063,102 @@ func TestGetCAR(t *testing.T) {
 	}
 }
 
+func TestPassthroughErrors(t *testing.T) {
+	t.Run("PathTraversalError", func(t *testing.T) {
+		pathTraversalTest := func(t *testing.T, traversal func(ctx context.Context, p gateway.ImmutablePath, backend *lib.GraphGateway) error) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			var requestNum int
+			s := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				requestNum++
+				switch requestNum {
+				case 1:
+					// Expect the full request, but return one that terminates in the middle of the path
+					expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir/exampleA"
+					if request.URL.Path != expectedUri {
+						panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
+					}
+
+					if err := sendBlocks(ctx, dirWithMultiblockHAMTandFiles, writer, []string{
+						"bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi", // root dir
+					}); err != nil {
+						panic(err)
+					}
+				case 2:
+					// Expect the full request, but return one that terminates in the middle of the file
+					// Note: this is an implementation detail, it could be in the future that we request less data (e.g. partial path)
+					expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir/exampleA"
+					if request.URL.Path != expectedUri {
+						panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
+					}
+
+					if err := sendBlocks(ctx, dirWithMultiblockHAMTandFiles, writer, []string{
+						"bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi", // root dir
+						"bafybeignui4g7l6cvqyy4t6vnbl2fjtego4ejmpcia77jhhwnksmm4bejm", // hamt root
+					}); err != nil {
+						panic(err)
+					}
+				default:
+					t.Fatal("unsupported request number")
+				}
+			}))
+			defer s.Close()
+
+			bs := newProxyBlockStore([]string{s.URL}, newCachedDNS(dnsCacheRefreshInterval))
+			p, err := gateway.NewImmutablePath(path.New("/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir/exampleA"))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			bogusErr := gateway.NewErrorStatusCode(fmt.Errorf("this is a test error"), 418)
+
+			clientRequestNum := 0
+			backend, err := lib.NewGraphGatewayBackend(&retryFetcher{
+				inner: &fetcherWrapper{fn: func(ctx context.Context, path string, cb lib.DataCallback) error {
+					clientRequestNum++
+					if clientRequestNum > 2 {
+						return bogusErr
+					}
+					return bs.(lib.CarFetcher).Fetch(ctx, path, cb)
+				}},
+				allowedRetries: 3, retriesRemaining: 3})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			err = traversal(ctx, p, backend)
+			parsedErr := &gateway.ErrorStatusCode{}
+			if errors.As(err, &parsedErr) {
+				if parsedErr.StatusCode == bogusErr.StatusCode {
+					return
+				}
+			}
+			t.Fatal("error did not pass through")
+		}
+		t.Run("Block", func(t *testing.T) {
+			pathTraversalTest(t, func(ctx context.Context, p gateway.ImmutablePath, backend *lib.GraphGateway) error {
+				_, _, err := backend.GetBlock(ctx, p)
+				return err
+			})
+		})
+		t.Run("File", func(t *testing.T) {
+			pathTraversalTest(t, func(ctx context.Context, p gateway.ImmutablePath, backend *lib.GraphGateway) error {
+				_, _, err := backend.Get(ctx, p)
+				return err
+			})
+		})
+	})
+}
+
+type fetcherWrapper struct {
+	fn func(ctx context.Context, path string, cb lib.DataCallback) error
+}
+
+func (w *fetcherWrapper) Fetch(ctx context.Context, path string, cb lib.DataCallback) error {
+	return w.fn(ctx, path, cb)
+}
+
 type retryFetcher struct {
 	inner            lib.CarFetcher
 	allowedRetries   int

@@ -1,7 +1,11 @@
 package lib
 
 import (
+	"errors"
+	"fmt"
+	"github.com/stretchr/testify/assert"
 	"testing"
+	"time"
 
 	ifacepath "github.com/ipfs/boxo/coreiface/path"
 	"github.com/ipfs/boxo/gateway"
@@ -54,4 +58,37 @@ func TestContentPathToCarUrl(t *testing.T) {
 			}
 		})
 	}
+}
+
+type testErr struct {
+	message    string
+	retryAfter time.Duration
+}
+
+func (e *testErr) Error() string {
+	return e.message
+}
+
+func (e *testErr) RetryAfter() time.Duration {
+	return e.retryAfter
+}
+
+func TestGatewayErrorRetryAfter(t *testing.T) {
+	originalErr := &testErr{message: "test", retryAfter: time.Minute}
+	var (
+		convertedErr error
+		gatewayErr   *gateway.ErrorRetryAfter
+	)
+
+	// Test unwrapped
+	convertedErr = GatewayError(originalErr)
+	ok := errors.As(convertedErr, &gatewayErr)
+	assert.True(t, ok)
+	assert.EqualValues(t, originalErr.retryAfter, gatewayErr.RetryAfter)
+
+	// Test wrapped.
+	convertedErr = GatewayError(fmt.Errorf("wrapped error: %w", originalErr))
+	ok = errors.As(convertedErr, &gatewayErr)
+	assert.True(t, ok)
+	assert.EqualValues(t, originalErr.retryAfter, gatewayErr.RetryAfter)
 }
