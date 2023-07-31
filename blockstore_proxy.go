@@ -43,7 +43,7 @@ func (ps *proxyBlockStore) Fetch(ctx context.Context, path string, cb lib.DataCa
 		return err
 	}
 	goLog.Debugw("car fetch", "url", req.URL)
-	req.Header.Set("Accept", "application/vnd.ipld.car")
+	req.Header.Set("Accept", "application/vnd.ipld.car;order=dfs;dups=y")
 	resp, err := ps.httpClient.Do(req)
 	if err != nil {
 		return err
