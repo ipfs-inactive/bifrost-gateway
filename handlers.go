@@ -139,6 +139,7 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 		publicGateways["example.com"] = &gateway.PublicGateway{
 			Paths:                 []string{"/ipfs", "/ipns"},
 			NoDNSLink:             noDNSLink,
+			InlineDNSLink:         true,
 			DeserializedResponses: true,
 			UseSubdomains:         true,
 		}
