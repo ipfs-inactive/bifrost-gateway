@@ -119,16 +119,20 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 
 	// Note: in the future we may want to make this more configurable.
 	noDNSLink := false
+
+	// TODO: allow appending hostnames to this list via ENV variable (separate PATH_GATEWAY_HOSTS & SUBDOMAIN_GATEWAY_HOSTS)
 	publicGateways := map[string]*gateway.PublicGateway{
 		"localhost": {
 			Paths:                 []string{"/ipfs", "/ipns"},
 			NoDNSLink:             noDNSLink,
+			InlineDNSLink:         false,
 			DeserializedResponses: true,
 			UseSubdomains:         true,
 		},
 		"dweb.link": {
 			Paths:                 []string{"/ipfs", "/ipns"},
 			NoDNSLink:             noDNSLink,
+			InlineDNSLink:         true,
 			DeserializedResponses: true,
 			UseSubdomains:         true,
 		},
@@ -139,9 +143,13 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 		publicGateways["example.com"] = &gateway.PublicGateway{
 			Paths:                 []string{"/ipfs", "/ipns"},
 			NoDNSLink:             noDNSLink,
+			InlineDNSLink:         true,
 			DeserializedResponses: true,
 			UseSubdomains:         true,
 		}
+
+		// TODO: revisit the below once we clarify desired behavior in https://specs.ipfs.tech/http-gateways/subdomain-gateway/
+		publicGateways["localhost"].InlineDNSLink = true
 	}
 
 	gwConf.NoDNSLink = noDNSLink

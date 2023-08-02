@@ -18,7 +18,7 @@ jobs:
 
       # 2. Download the gateway-conformance fixtures
       - name: Download gateway-conformance fixtures
-        uses: ipfs/gateway-conformance/.github/actions/extract-fixtures@v0.2
+        uses: ipfs/gateway-conformance/.github/actions/extract-fixtures@v0.3
         with:
           output: fixtures
 
@@ -26,7 +26,15 @@ jobs:
       - name: Import fixtures
         run: |
           # Import car files
-          find ./fixtures -name '*.car' -exec ipfs dag import --pin-roots=false {} \;
+          find ./fixtures -name '*.car' -exec ipfs dag import --pin-roots=false --offline {} \;
+
+          # Import ipns records
+          records=$(find ./fixtures -name '*.ipns-record')
+          for record in $records
+          do
+              key=$(basename -s .ipns-record "$record" | cut -d'_' -f1)
+              ipfs routing put --allow-offline --offline "/ipns/$key" "$record"
+          done
 
           # Import dnslink records
           # the IPFS_NS_MAP env will be used by the daemon
@@ -57,15 +65,16 @@ jobs:
 
       # 6. Run the gateway-conformance tests
       - name: Run gateway-conformance tests
-        uses: ipfs/gateway-conformance/.github/actions/test@v0.2
+        uses: ipfs/gateway-conformance/.github/actions/test@v0.3
         with:
           gateway-url: http://127.0.0.1:8081
           json: output.json
           xml: output.xml
           html: output.html
           markdown: output.md
-          specs: +trustless-gateway,-trustless-ipns-gateway,+path-gateway,-path-ipns-gateway,+subdomain-gateway,-subdomain-ipns-gateway,+dnslink-gateway
-          args: -skip 'TestGatewayCar/GET_response_for_application/vnd.ipld.car/Header_Content-Length'
+          specs: +trustless-gateway,+path-gateway,+subdomain-gateway,+dnslink-gateway,+redirects-file
+          # use below to skip specific test if needed
+          # args: -skip 'TestFooBr/GET_response_for_something'
 
       # 7. Upload the results
       - name: Upload MD summary
