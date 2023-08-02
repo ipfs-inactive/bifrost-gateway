@@ -26,14 +26,14 @@ jobs:
       - name: Import fixtures
         run: |
           # Import car files
-          find ./fixtures -name '*.car' -exec ipfs dag import --pin-roots=false {} \;
+          find ./fixtures -name '*.car' -exec ipfs dag import --pin-roots=false --offline {} \;
 
           # Import ipns records
           records=$(find ./fixtures -name '*.ipns-record')
           for record in $records
           do
               key=$(basename -s .ipns-record "$record" | cut -d'_' -f1)
-              ipfs routing put --allow-offline "/ipns/$key" "$record"
+              ipfs routing put --allow-offline --offline "/ipns/$key" "$record"
           done
 
           # Import dnslink records
