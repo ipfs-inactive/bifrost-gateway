@@ -28,6 +28,14 @@ jobs:
           # Import car files
           find ./fixtures -name '*.car' -exec ipfs dag import --pin-roots=false {} \;
 
+          # Import ipns records
+          records=$(find ./fixtures -name '*.ipns-record')
+          for record in $records
+          do
+              key=$(basename -s .ipns-record "$record" | cut -d'_' -f1)
+              ipfs routing put --allow-offline "/ipns/$key" "$record"
+          done
+
           # Import dnslink records
           # the IPFS_NS_MAP env will be used by the daemon
           export IPFS_NS_MAP=$(cat "./fixtures/dnslinks.json" | jq -r '.subdomains | to_entries | map("\(.key).example.com:\(.value)") | join(",")')
@@ -64,8 +72,9 @@ jobs:
           xml: output.xml
           html: output.html
           markdown: output.md
-          specs: +trustless-gateway,-trustless-ipns-gateway,+path-gateway,-path-ipns-gateway,+subdomain-gateway,-subdomain-ipns-gateway,+dnslink-gateway
-          args: -skip 'TestGatewayCar/GET_response_for_application/vnd.ipld.car/Header_Content-Length'
+          specs: +trustless-gateway,+path-gateway,+subdomain-gateway,+dnslink-gateway,+redirects-file
+          # use below to skip specific test if needed
+          # args: -skip 'TestFooBr/GET_response_for_something'
 
       # 7. Upload the results
       - name: Upload MD summary
