@@ -31,7 +31,7 @@ import (
 type getBlock func(ctx context.Context, cid cid.Cid) (blocks.Block, error)
 
 func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *GraphGatewayMetrics) (getBlock, error) {
-	cr, err := car.NewCarReader(reader)
+	cr, err := car.NewCarReaderWithOptions(reader, car.WithErrorOnEmptyRoots(false))
 	if err != nil {
 		return nil, err
 	}
