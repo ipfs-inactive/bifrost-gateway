@@ -89,8 +89,8 @@ github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7
 github.com/felixge/httpsnoop v1.0.0/go.mod h1:3+D9sFq0ahK/JeJPhCBUV1xlf4/eIYrUQaxulT0VzX8=
 github.com/felixge/httpsnoop v1.0.3 h1:s/nj+GCswXYzN5v2DpNMuMQYe+0DDwt5WVCU6CWBdXk=
 github.com/felixge/httpsnoop v1.0.3/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
-github.com/filecoin-saturn/caboose v0.0.5-0.20230808102944-c571d3c480c5 h1:EToCuOD/itL2/UFCf/Ut9jFIno/VjHCcDvYc7LDQXs0=
-github.com/filecoin-saturn/caboose v0.0.5-0.20230808102944-c571d3c480c5/go.mod h1:nmDICK/NKu6r3c6V6W/h6vi7Ep2b+jWbRbEg51ltkHs=
+github.com/filecoin-saturn/caboose v0.0.5-0.20230808125624-a986b542aa10 h1:VZhzrXd6IuL52U18KtTQ/q4v48J90a1aDr/maLF3H9Y=
+github.com/filecoin-saturn/caboose v0.0.5-0.20230808125624-a986b542aa10/go.mod h1:nmDICK/NKu6r3c6V6W/h6vi7Ep2b+jWbRbEg51ltkHs=
 github.com/flynn/noise v1.0.0 h1:DlTHqmzmvcEiKj+4RYo/imoswx/4r6iBlCMfVtrMXpQ=
 github.com/francoispqt/gojay v1.2.13 h1:d2m3sFjloqoIUQU3TsHBgj6qg/BVGlTBeHDUmyJnXKk=
 github.com/frankban/quicktest v1.14.4 h1:g2rn0vABPOOXmZUj+vbmUp0lPoXEMuhTpIluN0XL9UY=
