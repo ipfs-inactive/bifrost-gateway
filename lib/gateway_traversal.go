@@ -102,7 +102,7 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 			return blkRead.block, nil
 		}
 		return nil, caboose.ErrInvalidResponse{
-			Message: fmt.Sprintf("received a nil block with no error"),
+			Message: "received a nil block with no error",
 		}
 	}, nil
 }
