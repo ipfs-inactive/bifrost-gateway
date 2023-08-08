@@ -31,6 +31,8 @@ import (
 
 type getBlock func(ctx context.Context, cid cid.Cid) (blocks.Block, error)
 
+var ErrNilBlock = caboose.ErrInvalidResponse{Message: "received a nil block with no error"}
+
 func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *GraphGatewayMetrics) (getBlock, error) {
 	cr, err := car.NewCarReaderWithOptions(reader, car.WithErrorOnEmptyRoots(false))
 	if err != nil {
@@ -95,15 +97,11 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 		if blkRead.block != nil {
 			metrics.carBlocksFetchedMetric.Inc()
 			if !blkRead.block.Cid().Equals(c) {
-				return nil, caboose.ErrInvalidResponse{
-					Message: fmt.Sprintf("unexpected block received: expected %s, got %s", c, blkRead.block.Cid()),
-				}
+				return nil, ErrNilBlock
 			}
 			return blkRead.block, nil
 		}
-		return nil, caboose.ErrInvalidResponse{
-			Message: "received a nil block with no error",
-		}
+		return nil, ErrNilBlock
 	}, nil
 }
 
