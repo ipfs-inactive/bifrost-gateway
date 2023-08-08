@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/filecoin-saturn/caboose"
 	"io"
 	"sync"
 	"time"
@@ -94,11 +95,15 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 		if blkRead.block != nil {
 			metrics.carBlocksFetchedMetric.Inc()
 			if !blkRead.block.Cid().Equals(c) {
-				return nil, fmt.Errorf("unexpected block received: expected %s, got %s", c, blkRead.block.Cid())
+				return nil, caboose.ErrInvalidResponse{
+					Message: fmt.Sprintf("unexpected block received: expected %s, got %s", c, blkRead.block.Cid()),
+				}
 			}
 			return blkRead.block, nil
 		}
-		return nil, fmt.Errorf("received a nil block with no error")
+		return nil, caboose.ErrInvalidResponse{
+			Message: fmt.Sprintf("received a nil block with no error"),
+		}
 	}, nil
 }
 
