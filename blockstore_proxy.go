@@ -25,8 +25,7 @@ import (
 const (
 	EnvProxyGateway = "PROXY_GATEWAY_URL"
 
-	DefaultProxyGateway = "http://127.0.0.1:8080"
-	DefaultKuboRPC      = "http://127.0.0.1:5001"
+	DefaultKuboRPC = "http://127.0.0.1:5001"
 )
 
 type proxyBlockStore struct {

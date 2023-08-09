@@ -68,9 +68,9 @@ func withRequestLogger(next http.Handler) http.Handler {
 	})
 }
 
-func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphBackend bool) (*http.Server, error) {
+func makeGatewayHandler(bs bstore.Blockstore, kuboRPC, gatewayURLs []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphBackend bool) (*http.Server, error) {
 	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
-	routing := newProxyRouting(kuboRPC, cdns)
+	routing := newProxyRouting(gatewayURLs, cdns)
 
 	// Sets up a cache to store blocks in
 	cacheBlockStore, err := lib.NewCacheBlockStore(blockCacheSize)

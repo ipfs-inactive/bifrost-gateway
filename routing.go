@@ -1,11 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -19,20 +15,20 @@ import (
 )
 
 type proxyRouting struct {
-	kuboRPC    []string
-	httpClient *http.Client
-	rand       *rand.Rand
+	gatewayURLs []string
+	httpClient  *http.Client
+	rand        *rand.Rand
 }
 
-func newProxyRouting(kuboRPC []string, cdns *cachedDNS) routing.ValueStore {
+func newProxyRouting(gatewayURLs []string, cdns *cachedDNS) routing.ValueStore {
 	s := rand.NewSource(time.Now().Unix())
 	rand := rand.New(s)
 
 	return &proxyRouting{
-		kuboRPC: kuboRPC,
+		gatewayURLs: gatewayURLs,
 		httpClient: &http.Client{
 			Transport: otelhttp.NewTransport(&customTransport{
-				// Roundtripper with increased defaults than http.Transport such that retrieving
+				// RoundTripper with increased defaults than http.Transport such that retrieving
 				// multiple lookups concurrently is fast.
 				RoundTripper: &http.Transport{
 					MaxIdleConns:        1000,
@@ -53,7 +49,16 @@ func (ps *proxyRouting) PutValue(context.Context, string, []byte, ...routing.Opt
 }
 
 func (ps *proxyRouting) GetValue(ctx context.Context, k string, opts ...routing.Option) ([]byte, error) {
-	return ps.fetch(ctx, k)
+	if !strings.HasPrefix(k, "/ipns/") {
+		return nil, routing.ErrNotSupported
+	}
+
+	name, err := ipns.NameFromRoutingKey([]byte(k))
+	if err != nil {
+		return nil, err
+	}
+
+	return ps.fetch(ctx, name)
 }
 
 func (ps *proxyRouting) SearchValue(ctx context.Context, k string, opts ...routing.Option) (<-chan []byte, error) {
@@ -61,10 +66,15 @@ func (ps *proxyRouting) SearchValue(ctx context.Context, k string, opts ...routi
 		return nil, routing.ErrNotSupported
 	}
 
+	name, err := ipns.NameFromRoutingKey([]byte(k))
+	if err != nil {
+		return nil, err
+	}
+
 	ch := make(chan []byte)
 
 	go func() {
-		v, err := ps.fetch(ctx, k)
+		v, err := ps.fetch(ctx, name)
 		if err != nil {
 			close(ch)
 		} else {
@@ -76,24 +86,18 @@ func (ps *proxyRouting) SearchValue(ctx context.Context, k string, opts ...routi
 	return ch, nil
 }
 
-func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err error) {
-	name, err := ipns.NameFromRoutingKey([]byte(key))
+func (ps *proxyRouting) fetch(ctx context.Context, name ipns.Name) ([]byte, error) {
+	urlStr := fmt.Sprintf("%s/ipns/%s", ps.getRandomGatewayURL(), name.String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Accept", "application/vnd.ipfs.ipns-record")
 
-	key = "/ipns/" + name.String()
-
-	urlStr := fmt.Sprintf("%s/api/v0/dht/get?arg=%s", ps.getRandomKuboURL(), key)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	goLog.Debugw("routing proxy fetch", "key", key, "from", req.URL.String())
+	goLog.Debugw("routing proxy fetch", "key", name.String(), "from", req.URL.String())
 	defer func() {
 		if err != nil {
-			goLog.Debugw("routing proxy fetch error", "key", key, "from", req.URL.String(), "error", err.Error())
+			goLog.Debugw("routing proxy fetch error", "key", name.String(), "from", req.URL.String(), "error", err.Error())
 		}
 	}()
 
@@ -103,47 +107,26 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err e
 	}
 	defer resp.Body.Close()
 
-	// Read at most 10 KiB (max size of IPNS record).
-	rb, err = io.ReadAll(io.LimitReader(resp.Body, 10240))
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("routing/get RPC returned unexpected status: %s, body: %q", resp.Status, string(rb))
+		return nil, fmt.Errorf("unexpected status from remote gateway: %s", resp.Status)
 	}
 
-	parts := bytes.Split(bytes.TrimSpace(rb), []byte("\n"))
-	var b64 string
-
-	for _, part := range parts {
-		var evt routing.QueryEvent
-		err = json.Unmarshal(part, &evt)
-		if err != nil {
-			return nil, fmt.Errorf("routing/get RPC response cannot be parsed: %w", err)
-		}
-
-		if evt.Type == routing.Value {
-			b64 = evt.Extra
-			break
-		}
-	}
-
-	if b64 == "" {
-		return nil, errors.New("routing/get RPC returned no value")
-	}
-
-	rb, err = base64.StdEncoding.DecodeString(b64)
+	rb, err := io.ReadAll(io.LimitReader(resp.Body, int64(ipns.MaxRecordSize)))
 	if err != nil {
 		return nil, err
 	}
 
-	entry, err := ipns.UnmarshalRecord(rb)
+	rec, err := ipns.UnmarshalRecord(rb)
 	if err != nil {
 		return nil, err
 	}
 
-	err = ipns.ValidateWithName(entry, name)
+	err = ipns.ValidateWithName(rec, name)
 	if err != nil {
 		return nil, err
 	}
@@ -151,6 +134,6 @@ func (ps *proxyRouting) fetch(ctx context.Context, key string) (rb []byte, err e
 	return rb, nil
 }
 
-func (ps *proxyRouting) getRandomKuboURL() string {
-	return ps.kuboRPC[ps.rand.Intn(len(ps.kuboRPC))]
+func (ps *proxyRouting) getRandomGatewayURL() string {
+	return ps.gatewayURLs[ps.rand.Intn(len(ps.gatewayURLs))]
 }
