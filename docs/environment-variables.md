@@ -26,10 +26,9 @@
 
 ### `KUBO_RPC_URL`
 
-Default: see `DefaultKuboRPC`
-
 Single URL or a comma separated list of RPC endpoints that provide `/api/v0` from Kubo.
 This is used to redirect legacy `/api/v0` commands that need to be handled on `ipfs.io`.
+If this is not set, the redirects are not set up.
 
 ### `BLOCK_CACHE_SIZE`
 

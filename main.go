@@ -58,7 +58,7 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		// Get env variables.
 		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, "")
 		proxyGateway := getEnvs(EnvProxyGateway, "")
-		kuboRPC := getEnvs(EnvKuboRPC, DefaultKuboRPC)
+		kuboRPC := getEnvs(EnvKuboRPC, "")
 
 		blockCacheSize, err := getEnvInt(EnvBlockCacheSize, lib.DefaultCacheBlockStoreSize)
 		if err != nil {
@@ -134,7 +134,10 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 			log.Printf("%s: %d", EnvBlockCacheSize, blockCacheSize)
 			log.Printf("%s: %t", EnvGraphBackend, useGraphBackend)
 
-			log.Printf("Legacy RPC at /api/v0 (%s) provided by %s", EnvKuboRPC, strings.Join(kuboRPC, " "))
+			if len(kuboRPC) != 0 {
+				log.Printf("Legacy RPC at /api/v0 (%s) provided by %s", EnvKuboRPC, strings.Join(kuboRPC, " "))
+			}
+
 			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
 			log.Printf("  Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
 			log.Printf("Subdomain gateway configured on dweb.link and http://localhost:%d", gatewayPort)
