@@ -243,6 +243,8 @@ func (api *GraphGateway) fetchCAR(ctx context.Context, path gateway.ImmutablePat
 
 	if ipldError != nil {
 		fetchErr = ipldError
+	} else if fetchErr != nil {
+		fetchErr = GatewayError(fetchErr)
 	}
 
 	return fetchErr
