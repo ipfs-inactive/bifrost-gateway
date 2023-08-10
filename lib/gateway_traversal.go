@@ -5,13 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/filecoin-saturn/caboose"
 	"io"
 	"sync"
 	"time"
 
+	"github.com/filecoin-saturn/caboose"
 	bsfetcher "github.com/ipfs/boxo/fetcher/impl/blockservice"
 	"github.com/ipfs/boxo/gateway"
+	"github.com/ipfs/boxo/verifcid"
 	blocks "github.com/ipfs/go-block-format"
 	"github.com/ipfs/go-cid"
 	"github.com/ipfs/go-unixfsnode"
@@ -69,6 +70,9 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 	return func(ctx context.Context, c cid.Cid) (blocks.Block, error) {
 		mx.Lock()
 		defer mx.Unlock()
+		if err := verifcid.ValidateCid(c); err != nil {
+			return nil, err
+		}
 
 		// initially set a higher timeout here so that if there's an initial timeout error we get it from the car reader.
 		var t *time.Timer
