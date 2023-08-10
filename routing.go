@@ -135,5 +135,5 @@ func (ps *proxyRouting) fetch(ctx context.Context, name ipns.Name) ([]byte, erro
 }
 
 func (ps *proxyRouting) getRandomGatewayURL() string {
-	return ps.gatewayURLs[ps.rand.Intn(len(ps.gatewayURLs))]
+	return strings.TrimSuffix(ps.gatewayURLs[ps.rand.Intn(len(ps.gatewayURLs))], "/")
 }

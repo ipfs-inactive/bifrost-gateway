@@ -58,19 +58,19 @@ in the near feature.
 ### `PROXY_GATEWAY_URL`
 
 Single URL or a comma separated list of Gateway endpoints that support `?format=block|car|ipns-record`
-responses. Either this variable of `STRN_ORCHESTRATOR_URL` must be set.
+responses. Either this variable or `STRN_ORCHESTRATOR_URL` must be set.
 
-If you're gateway does not support `?format=ipns-record`, you can use `IPNS_RECORD_GATEWAY`
+If this gateway does not support `application/vnd.ipfs.ipns-record`, you can use `IPNS_RECORD_GATEWAY`
 to override the gateway address from which to retrieve IPNS Records from.
 
 ### `IPNS_RECORD_GATEWAY`
 
-Single URL or a comma separated list of Gateway endpoints that support `?format=ipns-record`.
+Single URL or a comma separated list of Gateway endpoints that support requests for `application/vnd.ipfs.ipns-record`.
 This is used for IPNS Record routing. If not set, the value of `PROXY_GATEWAY_URL` will be
 used.
 
 `IPNS_RECORD_GATEWAY` also supports [Routing V1 HTTP API](https://specs.ipfs.tech/routing/http-routing-v1/)
-for IPNS Record routing. To use it, the provided URL must end with `/routing/v1`.
+for IPNS Record routing ([IPIP-379](https://specs.ipfs.tech/ipips/ipip-0379/)). To use it, the provided URL must end with `/routing/v1`.
 
 ## Saturn Backend
 
