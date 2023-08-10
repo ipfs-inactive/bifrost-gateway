@@ -30,6 +30,7 @@ import (
 	"github.com/ipfs/go-unixfsnode"
 	ufsData "github.com/ipfs/go-unixfsnode/data"
 	"github.com/ipfs/go-unixfsnode/hamt"
+	ufsiter "github.com/ipfs/go-unixfsnode/iter"
 	carv2 "github.com/ipld/go-car/v2"
 	"github.com/ipld/go-car/v2/storage"
 	dagpb "github.com/ipld/go-codec-dagpb"
@@ -694,6 +695,7 @@ func (it *backpressuredHAMTDirIterNoRecursion) Next() bool {
 			it.err = err
 			return false
 		}
+
 		var lnk ipld.Link
 		lnk, err = v.AsLink()
 		if err != nil {
@@ -709,10 +711,21 @@ func (it *backpressuredHAMTDirIterNoRecursion) Next() bool {
 
 		c := cl.Cid
 
+		pbLnk, ok := v.(*ufsiter.IterLink)
+		if !ok {
+			it.err = fmt.Errorf("HAMT value is not a dag-pb link")
+			return false
+		}
+
+		cumulativeDagSize := uint64(0)
+		if pbLnk.Substrate.Tsize.Exists() {
+			cumulativeDagSize = uint64(pbLnk.Substrate.Tsize.Must().Int())
+		}
+
 		it.curLnk = unixfs.LinkResult{
 			Link: &format.Link{
 				Name: name,
-				Size: 0,
+				Size: cumulativeDagSize,
 				Cid:  c,
 			},
 		}
