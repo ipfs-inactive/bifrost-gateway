@@ -104,6 +104,6 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 		PoolRefresh:  caboose.DefaultPoolRefreshInterval,
 		SaturnClient: saturnRetrievalClient,
 
-		ComplianceCidPeriod: int64(5),
+		ComplianceCidPeriod: int64(2),
 	})
 }
