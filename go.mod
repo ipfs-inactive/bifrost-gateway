@@ -1,6 +1,6 @@
 module github.com/ipfs/bifrost-gateway
 
-go 1.19
+go 1.20
 
 require (
 	github.com/filecoin-saturn/caboose v0.0.5-0.20230817081002-6aef1024aed8
