@@ -9,6 +9,9 @@ on:
 jobs:
   gateway-conformance:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        car-env: ["GRAPH_BACKEND=false", "GRAPH_BACKEND=true"]
     steps:
       # 1. Start the Kubo gateway
       - name: Download Kubo gateway
@@ -59,8 +62,15 @@ jobs:
       - name: Start bifrost-gateway
         env:
           PROXY_GATEWAY_URL: http://127.0.0.1:8080
+          KUBO_RPC_URL: http://127.0.0.1:5001
           GATEWAY_CONFORMANCE_TEST: true
-        run: ./bifrost-gateway &
+        run: |
+          # NOTE: we export car-env this way ON PURPOSE, to have full key=value
+          # present on PR status instead of just true/false without context
+          export ${{ matrix.car-env }}
+
+          # run gw
+          ./bifrost-gateway &
         working-directory: bifrost-gateway
 
       # 6. Run the gateway-conformance tests
@@ -75,6 +85,10 @@ jobs:
           specs: +trustless-gateway,+path-gateway,+subdomain-gateway,+dnslink-gateway,+redirects-file
           # use below to skip specific test if needed
           # args: -skip 'TestFooBr/GET_response_for_something'
+          #
+          # only-if-cached: bifrost-gateway does not guarantee local cache, we will adjust upstream test (which was Kubo-specific)
+          # for now disabling these test cases
+          args: -skip 'TestGatewayCache/.*_for_/ipfs/_with_only-if-cached_succeeds_when_in_local_datastore'
 
       # 7. Upload the results
       - name: Upload MD summary
