@@ -43,14 +43,20 @@ func (ps *proxyBlockStore) Fetch(ctx context.Context, path string, cb lib.DataCa
 		return err
 	}
 	goLog.Debugw("car fetch", "url", req.URL)
-	req.Header.Set("Accept", "application/vnd.ipld.car")
+	req.Header.Set("Accept", "application/vnd.ipld.car;order=dfs;dups=y")
 	resp, err := ps.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("http error from car gateway: %s", resp.Status)
+		errData, err := io.ReadAll(resp.Body)
+		if err != nil {
+			err = fmt.Errorf("could not read error message: %w", err)
+		} else {
+			err = fmt.Errorf("%q", string(errData))
+		}
+		return fmt.Errorf("http error from car gateway: %s: %w", resp.Status, err)
 	}
 
 	err = cb(path, resp.Body)

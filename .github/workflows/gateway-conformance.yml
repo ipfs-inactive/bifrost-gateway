@@ -14,8 +14,16 @@ jobs:
         car-env: ["GRAPH_BACKEND=false", "GRAPH_BACKEND=true"]
     steps:
       # 1. Start the Kubo gateway
-      - name: Download Kubo gateway
-        uses: ipfs/download-ipfs-distribution-action@v1
+      - name: Setup Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.19.x
+      - uses: protocol/cache-go-action@v1
+
+      - name: Install Kubo gateway from source
+        #uses: ipfs/download-ipfs-distribution-action@v1
+        run: |
+          go install github.com/ipfs/kubo/cmd/ipfs@73552dfd9c6f73fdab887c4d2e99cf7e848a3c23
       - name: Start Kubo gateway
         uses: ipfs/start-ipfs-daemon-action@v1
 
@@ -46,10 +54,6 @@ jobs:
           echo "IPFS_NS_MAP=${IPFS_NS_MAP}" >> $GITHUB_ENV
 
       # 4. Build the bifrost-gateway
-      - name: Setup Go
-        uses: actions/setup-go@v3
-        with:
-          go-version: 1.19.x
       - name: Checkout bifrost-gateway
         uses: actions/checkout@v3
         with:
