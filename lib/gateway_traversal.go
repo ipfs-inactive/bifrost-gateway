@@ -147,12 +147,12 @@ func getLinksystem(fn getBlock) *ipld.LinkSystem {
 }
 
 // walkGatewaySimpleSelector walks the subgraph described by the path and terminal element parameters
-func walkGatewaySimpleSelector(ctx context.Context, terminalBlk blocks.Block, params gateway.CarParams, lsys *ipld.LinkSystem) error {
+func walkGatewaySimpleSelector(ctx context.Context, terminalBlk blocks.Block, dagScope gateway.DagScope, entityRange *gateway.DagByteRange, lsys *ipld.LinkSystem) error {
 	lctx := ipld.LinkContext{Ctx: ctx}
 	var err error
 
 	// If the scope is the block, we only need the root block of the last element of the path, which we have.
-	if params.Scope == gateway.DagScopeBlock {
+	if dagScope == gateway.DagScopeBlock {
 		return nil
 	}
 
@@ -186,7 +186,7 @@ func walkGatewaySimpleSelector(ctx context.Context, terminalBlk blocks.Block, pa
 	// Does it matter that we're using a linksystem with the UnixFS reifier for dagscope=all?
 
 	// If we're asking for everything then give it
-	if params.Scope == gateway.DagScopeAll {
+	if dagScope == gateway.DagScopeAll {
 		sel, err := selector.ParseSelector(selectorparse.CommonSelector_ExploreAllRecursively)
 		if err != nil {
 			return err
@@ -197,7 +197,7 @@ func walkGatewaySimpleSelector(ctx context.Context, terminalBlk blocks.Block, pa
 				Ctx:                            ctx,
 				LinkSystem:                     *lsys,
 				LinkTargetNodePrototypeChooser: bsfetcher.DefaultPrototypeChooser,
-				LinkVisitOnlyOnce:              true, // This is safe for the "all" selector
+				LinkVisitOnlyOnce:              false, // Despite being safe for the "all" selector we do this walk anyway since this is how we will be receiving the blocks
 			},
 		}
 
@@ -255,29 +255,29 @@ func walkGatewaySimpleSelector(ctx context.Context, terminalBlk blocks.Block, pa
 			}
 
 			// Get the entity range. If it's empty, assume the defaults (whole file).
-			entityRange := params.Range
-			if entityRange == nil {
-				entityRange = &gateway.DagByteRange{
+			effectiveRange := entityRange
+			if effectiveRange == nil {
+				effectiveRange = &gateway.DagByteRange{
 					From: 0,
 				}
 			}
 
-			from := entityRange.From
+			from := effectiveRange.From
 
 			// If we're starting to read based on the end of the file, find out where that is.
 			var fileLength int64
 			foundFileLength := false
-			if entityRange.From < 0 {
+			if effectiveRange.From < 0 {
 				fileLength, err = f.Seek(0, io.SeekEnd)
 				if err != nil {
 					return err
 				}
-				from = fileLength + entityRange.From
+				from = fileLength + effectiveRange.From
 				foundFileLength = true
 			}
 
 			// If we're reading until the end of the file then do it
-			if entityRange.To == nil {
+			if effectiveRange.To == nil {
 				if _, err := f.Seek(from, io.SeekStart); err != nil {
 					return err
 				}
@@ -285,13 +285,13 @@ func walkGatewaySimpleSelector(ctx context.Context, terminalBlk blocks.Block, pa
 				return err
 			}
 
-			to := *entityRange.To
-			if (*entityRange.To) < 0 && !foundFileLength {
+			to := *effectiveRange.To
+			if (*effectiveRange.To) < 0 && !foundFileLength {
 				fileLength, err = f.Seek(0, io.SeekEnd)
 				if err != nil {
 					return err
 				}
-				to = fileLength + *entityRange.To
+				to = fileLength + *effectiveRange.To
 				foundFileLength = true
 			}
 

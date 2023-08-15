@@ -1195,7 +1195,7 @@ func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath,
 			}
 
 			if cw == nil {
-				cw, err = storage.NewWritable(w, []cid.Cid{terminalCid}, carv2.WriteAsCarV1(true))
+				cw, err = storage.NewWritable(w, []cid.Cid{terminalCid}, carv2.WriteAsCarV1(true), carv2.AllowDuplicatePuts(params.Duplicates.Bool()))
 				if err != nil {
 					// io.PipeWriter.CloseWithError always returns nil.
 					_ = w.CloseWithError(err)
@@ -1211,7 +1211,7 @@ func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath,
 				blockBuffer = nil
 			}
 
-			err = walkGatewaySimpleSelector(ctx, terminalBlk, params, l)
+			err = walkGatewaySimpleSelector(ctx, terminalBlk, params.Scope, params.Range, l)
 			if err != nil {
 				return err
 			}
