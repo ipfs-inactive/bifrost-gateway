@@ -28,6 +28,7 @@ import (
 	"github.com/ipld/go-ipld-prime/traversal"
 	"github.com/ipld/go-ipld-prime/traversal/selector"
 	selectorparse "github.com/ipld/go-ipld-prime/traversal/selector/parse"
+	"github.com/multiformats/go-multihash"
 )
 
 type getBlock func(ctx context.Context, cid cid.Cid) (blocks.Block, error)
@@ -74,6 +75,11 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 			return nil, err
 		}
 
+		isId, bdata := extractIdentityMultihashCIDContents(c)
+		if isId {
+			return blocks.NewBlockWithCid(bdata, c)
+		}
+
 		// initially set a higher timeout here so that if there's an initial timeout error we get it from the car reader.
 		var t *time.Timer
 		if isFirstBlock {
@@ -107,6 +113,22 @@ func carToLinearBlockGetter(ctx context.Context, reader io.Reader, metrics *Grap
 		}
 		return nil, ErrNilBlock
 	}, nil
+}
+
+// extractIdentityMultihashCIDContents will check if a given CID has an identity multihash and if so return true and
+// the bytes encoded in the digest, otherwise will return false.
+// Taken from https://github.com/ipfs/boxo/blob/b96767cc0971ca279feb36e7844e527a774309ab/blockstore/idstore.go#L30
+func extractIdentityMultihashCIDContents(k cid.Cid) (bool, []byte) {
+	// Pre-check by calling Prefix(), this much faster than extracting the hash.
+	if k.Prefix().MhType != multihash.IDENTITY {
+		return false, nil
+	}
+
+	dmh, err := multihash.Decode(k.Hash())
+	if err != nil || dmh.Code != multihash.IDENTITY {
+		return false, nil
+	}
+	return true, dmh.Digest
 }
 
 func getLinksystem(fn getBlock) *ipld.LinkSystem {
