@@ -853,7 +853,7 @@ func TestGetHAMTDirectory(t *testing.T) {
 			// Expect a request for a non-existent index.html file
 			// Note: this is an implementation detail related to the directory request above
 			// Note: the order of cases 3 and 4 here are implementation specific as well
-			expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir//index.html"
+			expectedUri := "/ipfs/bafybeid3fd2xxdcd3dbj7trb433h2aqssn6xovjbwnkargjv7fuog4xjdi/hamtDir/index.html"
 			if request.URL.Path != expectedUri {
 				panic(fmt.Errorf("expected URI %s, got %s", expectedUri, request.RequestURI))
 			}
