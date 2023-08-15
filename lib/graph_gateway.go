@@ -468,7 +468,14 @@ func loadTerminalEntity(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *
 			}
 		}
 
-		return gateway.NewGetResponseFromReader(files.NewBytesFile(blockData), int64(len(blockData))), nil
+		f := files.NewBytesFile(blockData)
+		if params.Range != nil && params.Range.From != 0 {
+			if _, err := f.Seek(params.Range.From, io.SeekStart); err != nil {
+				return nil, err
+			}
+		}
+
+		return gateway.NewGetResponseFromReader(f, int64(len(blockData))), nil
 	}
 
 	blockData, pbn, ufsFieldData, fieldNum, err := loadUnixFSBase(ctx, c, blk, lsys)
