@@ -109,10 +109,6 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		}
 
 		ipnsProxyGateway := getEnvs(EnvIPNSRecordGateway, "")
-		if len(ipnsProxyGateway) == 0 {
-			ipnsProxyGateway = proxyGateway
-		}
-
 		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, ipnsProxyGateway, gatewayPort, blockCacheSize, cdns, useGraphBackend)
 		if err != nil {
 			return err

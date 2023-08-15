@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/ipfs/bifrost-gateway/lib"
+	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/filecoin-saturn/caboose"
@@ -69,8 +71,15 @@ func withRequestLogger(next http.Handler) http.Handler {
 }
 
 func makeGatewayHandler(bs bstore.Blockstore, kuboRPC, gatewayURLs []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphBackend bool) (*http.Server, error) {
-	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
-	routing := newProxyRouting(gatewayURLs, cdns)
+	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway or kubo RPC.
+	var routing routing.ValueStore
+	if len(gatewayURLs) != 0 {
+		routing = newProxyRouting(gatewayURLs, cdns)
+	} else if len(kuboRPC) != 0 {
+		routing = newRPCProxyRouting(kuboRPC, cdns)
+	} else {
+		return nil, errors.New("kubo rpc or gateway urls must be provided in order to delegate routing")
+	}
 
 	// Sets up a cache to store blocks in
 	cacheBlockStore, err := lib.NewCacheBlockStore(blockCacheSize)

@@ -65,11 +65,12 @@ to override the gateway address from which to retrieve IPNS Records from.
 ### `IPNS_RECORD_GATEWAY`
 
 Single URL or a comma separated list of Gateway endpoints that support requests for `application/vnd.ipfs.ipns-record`.
-This is used for IPNS Record routing. If not set, the value of `PROXY_GATEWAY_URL` will be
-used.
+This is used for IPNS Record routing.
 
 `IPNS_RECORD_GATEWAY` also supports [Routing V1 HTTP API](https://specs.ipfs.tech/routing/http-routing-v1/)
 for IPNS Record routing ([IPIP-379](https://specs.ipfs.tech/ipips/ipip-0379/)). To use it, the provided URL must end with `/routing/v1`.
+
+If not set, the IPNS records will be fetched from `KUBO_RPC_URL`.
 
 ## Saturn Backend
 
