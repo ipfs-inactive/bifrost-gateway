@@ -1147,6 +1147,12 @@ func (api *GraphGateway) GetCAR(ctx context.Context, path gateway.ImmutablePath,
 	}
 	p := ipfspath.FromString(path.String())
 
+	switch params.Order {
+	case gateway.DagOrderUnspecified, gateway.DagOrderUnknown, gateway.DagOrderDFS:
+	default:
+		return gateway.ContentPathMetadata{}, nil, fmt.Errorf("unsupported dag order %q", params.Order)
+	}
+
 	r, w := io.Pipe()
 	go func() {
 		numBlocksSent := 0
