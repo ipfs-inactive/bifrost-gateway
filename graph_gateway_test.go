@@ -428,7 +428,7 @@ func sendBlocks(ctx context.Context, carFixture []byte, writer io.Writer, cidStr
 		return err
 	}
 
-	cw, err := storage.NewWritable(writer, []cid.Cid{cid.MustParse("bafkqaaa")}, carv2.WriteAsCarV1(true))
+	cw, err := storage.NewWritable(writer, []cid.Cid{cid.MustParse("bafkqaaa")}, carv2.WriteAsCarV1(true), carv2.AllowDuplicatePuts(true))
 	if err != nil {
 		return err
 	}
