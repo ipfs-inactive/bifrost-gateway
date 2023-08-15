@@ -471,15 +471,18 @@ func loadTerminalEntity(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *
 		return gateway.NewGetResponseFromReader(files.NewBytesFile(blockData), int64(len(blockData))), nil
 	}
 
-	blockData, pbn, _, fieldNum, fieldDataBytes, err := loadUnixFSBase(ctx, c, blk, lsys)
+	blockData, pbn, ufsFieldData, fieldNum, err := loadUnixFSBase(ctx, c, blk, lsys)
 	if err != nil {
 		return nil, err
 	}
 
 	switch fieldNum {
 	case ufsData.Data_Symlink:
-		lnkTarget := string(fieldDataBytes)
-		f := gateway.NewGetResponseFromSymlink(files.NewLinkFile(lnkTarget, nil).(*files.Symlink), int64(len(fieldDataBytes)))
+		if !ufsFieldData.FieldData().Exists() {
+			return nil, fmt.Errorf("invalid UnixFS symlink object")
+		}
+		lnkTarget := string(ufsFieldData.FieldData().Must().Bytes())
+		f := gateway.NewGetResponseFromSymlink(files.NewLinkFile(lnkTarget, nil).(*files.Symlink), int64(len(lnkTarget)))
 		return f, nil
 	case ufsData.Data_Metadata:
 		return nil, fmt.Errorf("UnixFS Metadata unsupported")
@@ -656,13 +659,13 @@ func (it *backpressuredHAMTDirIterNoRecursion) Next() bool {
 				continue
 			}
 
-			_, pbn, fieldData, _, _, ufsBaseErr := loadUnixFSBase(it.ctx, it.dirCid, nil, lsys)
+			_, pbn, ufsFieldData, _, ufsBaseErr := loadUnixFSBase(it.ctx, it.dirCid, nil, lsys)
 			if ufsBaseErr != nil {
 				err = ufsBaseErr
 				continue
 			}
 
-			nd, err = hamt.NewUnixFSHAMTShard(it.ctx, pbn, fieldData, lsys)
+			nd, err = hamt.NewUnixFSHAMTShard(it.ctx, pbn, ufsFieldData, lsys)
 			if err != nil {
 				err = fmt.Errorf("could not reify sharded directory: %w", err)
 				continue

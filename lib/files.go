@@ -273,13 +273,13 @@ func (it *backpressuredHAMTDirIter) Next() bool {
 				continue
 			}
 
-			_, pbn, fieldData, _, _, ufsBaseErr := loadUnixFSBase(it.ctx, it.dirCid, nil, lsys)
+			_, pbn, ufsFieldData, _, ufsBaseErr := loadUnixFSBase(it.ctx, it.dirCid, nil, lsys)
 			if ufsBaseErr != nil {
 				err = ufsBaseErr
 				continue
 			}
 
-			nd, err = hamt.NewUnixFSHAMTShard(it.ctx, pbn, fieldData, lsys)
+			nd, err = hamt.NewUnixFSHAMTShard(it.ctx, pbn, ufsFieldData, lsys)
 			if err != nil {
 				err = fmt.Errorf("could not reify sharded directory: %w", err)
 				continue
@@ -376,7 +376,7 @@ var _ files.DirIterator = (*backpressuredHAMTDirIter)(nil)
 
 type lsysGetter = func(ctx context.Context, c cid.Cid, params gateway.CarParams) (*ipld.LinkSystem, error)
 
-func loadUnixFSBase(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld.LinkSystem) ([]byte, dagpb.PBNode, ufsData.UnixFSData, int64, []byte, error) {
+func loadUnixFSBase(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld.LinkSystem) ([]byte, dagpb.PBNode, ufsData.UnixFSData, int64, error) {
 	lctx := ipld.LinkContext{Ctx: ctx}
 	pathTerminalCidLink := cidlink.Link{Cid: c}
 
@@ -388,12 +388,12 @@ func loadUnixFSBase(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld
 	} else {
 		blockData, err = lsys.LoadRaw(lctx, pathTerminalCidLink)
 		if err != nil {
-			return nil, nil, nil, 0, nil, err
+			return nil, nil, nil, 0, err
 		}
 	}
 
 	if c.Type() == uint64(multicodec.Raw) {
-		return blockData, nil, nil, 0, nil, nil
+		return blockData, nil, nil, 0, nil
 	}
 
 	// decode the terminal block into a node
@@ -406,33 +406,33 @@ func loadUnixFSBase(ctx context.Context, c cid.Cid, blk blocks.Block, lsys *ipld
 
 	np, err := pc(pathTerminalCidLink, lctx)
 	if err != nil {
-		return nil, nil, nil, 0, nil, err
+		return nil, nil, nil, 0, err
 	}
 
 	decoder, err := lsys.DecoderChooser(pathTerminalCidLink)
 	if err != nil {
-		return nil, nil, nil, 0, nil, err
+		return nil, nil, nil, 0, err
 	}
 	nb := np.NewBuilder()
 	if err := decoder(nb, bytes.NewReader(blockData)); err != nil {
-		return nil, nil, nil, 0, nil, err
+		return nil, nil, nil, 0, err
 	}
 	lastCidNode := nb.Build()
 
 	if pbn, ok := lastCidNode.(dagpb.PBNode); !ok {
 		// If it's not valid dag-pb then we're done
-		return nil, nil, nil, 0, nil, errNotUnixFS
+		return nil, nil, nil, 0, errNotUnixFS
 	} else if !pbn.FieldData().Exists() {
 		// If it's not valid UnixFS then we're done
-		return nil, nil, nil, 0, nil, errNotUnixFS
+		return nil, nil, nil, 0, errNotUnixFS
 	} else if unixfsFieldData, decodeErr := ufsData.DecodeUnixFSData(pbn.Data.Must().Bytes()); decodeErr != nil {
-		return nil, nil, nil, 0, nil, errNotUnixFS
+		return nil, nil, nil, 0, errNotUnixFS
 	} else {
 		switch fieldNum := unixfsFieldData.FieldDataType().Int(); fieldNum {
 		case ufsData.Data_Symlink, ufsData.Data_Metadata, ufsData.Data_Raw, ufsData.Data_File, ufsData.Data_Directory, ufsData.Data_HAMTShard:
-			return nil, pbn, unixfsFieldData, fieldNum, pbn.FieldData().Must().Bytes(), nil
+			return nil, pbn, unixfsFieldData, fieldNum, nil
 		default:
-			return nil, nil, nil, 0, nil, errNotUnixFS
+			return nil, nil, nil, 0, errNotUnixFS
 		}
 	}
 }
@@ -447,7 +447,7 @@ func loadTerminalUnixFSElementWithRecursiveDirectories(ctx context.Context, c ci
 	}
 
 	lctx := ipld.LinkContext{Ctx: ctx}
-	blockData, pbn, _, fieldNum, fieldDataBytes, err := loadUnixFSBase(ctx, c, blk, lsys)
+	blockData, pbn, ufsFieldData, fieldNum, err := loadUnixFSBase(ctx, c, blk, lsys)
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +458,10 @@ func loadTerminalUnixFSElementWithRecursiveDirectories(ctx context.Context, c ci
 
 	switch fieldNum {
 	case ufsData.Data_Symlink:
-		lnkTarget := string(fieldDataBytes)
+		if !ufsFieldData.FieldData().Exists() {
+			return nil, fmt.Errorf("invalid UnixFS symlink object")
+		}
+		lnkTarget := string(ufsFieldData.FieldData().Must().Bytes())
 		f := files.NewLinkFile(lnkTarget, nil)
 		return f, nil
 	case ufsData.Data_Metadata:

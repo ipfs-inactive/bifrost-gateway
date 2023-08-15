@@ -6,7 +6,7 @@ require (
 	github.com/filecoin-saturn/caboose v0.0.5-0.20230808125624-a986b542aa10
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/hashicorp/golang-lru/v2 v2.0.1
-	github.com/ipfs/boxo v0.11.1-0.20230803093408-3b83506a2ea5
+	github.com/ipfs/boxo v0.11.1-0.20230811122208-5de8f5f5ca60
 	github.com/ipfs/go-block-format v0.1.2
 	github.com/ipfs/go-cid v0.4.1
 	github.com/ipfs/go-ipld-format v0.5.0
