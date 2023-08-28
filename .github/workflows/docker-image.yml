@@ -37,7 +37,7 @@ jobs:
       - name: Inspect triggering Releaser workflow run
         id: releaser
         if: github.event_name == 'workflow_run'
-        uses: protocol/.github/.github/actions/inspect-releaser@master
+        uses: pl-strflt/uci/.github/actions/inspect-releaser@v0.0
         with:
           artifacts-url: ${{ github.event.workflow_run.artifacts_url }}
   push_to_registry:
