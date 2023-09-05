@@ -15,10 +15,9 @@ jobs:
     steps:
       # 1. Start the Kubo gateway
       - name: Setup Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v4
         with:
           go-version: 1.19.x
-      - uses: protocol/cache-go-action@v1
 
       - name: Install Kubo gateway from source
         #uses: ipfs/download-ipfs-distribution-action@v1
