@@ -91,6 +91,8 @@ github.com/felixge/httpsnoop v1.0.3 h1:s/nj+GCswXYzN5v2DpNMuMQYe+0DDwt5WVCU6CWBd
 github.com/felixge/httpsnoop v1.0.3/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
 github.com/filecoin-saturn/caboose v0.0.5 h1:loXFzwJMMxgL7poGiulaC8wx4dQbvCZBmmysi+iCTIk=
 github.com/filecoin-saturn/caboose v0.0.5/go.mod h1:QDvW9vS0PQFEt/pJ8JpcWD7pZW6uIa0ic6YuY/8VGs8=
+github.com/filecoin-saturn/caboose v0.0.6 h1:pQMZ2M8ucBOGy30WIMHOzj0FDvxSyDIzSHw3bsX9T90=
+github.com/filecoin-saturn/caboose v0.0.6/go.mod h1:QDvW9vS0PQFEt/pJ8JpcWD7pZW6uIa0ic6YuY/8VGs8=
 github.com/flynn/noise v1.0.0 h1:DlTHqmzmvcEiKj+4RYo/imoswx/4r6iBlCMfVtrMXpQ=
 github.com/francoispqt/gojay v1.2.13 h1:d2m3sFjloqoIUQU3TsHBgj6qg/BVGlTBeHDUmyJnXKk=
 github.com/frankban/quicktest v1.14.4 h1:g2rn0vABPOOXmZUj+vbmUp0lPoXEMuhTpIluN0XL9UY=
