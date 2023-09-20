@@ -42,7 +42,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 	}
 
 	saturnOrchestratorClient := &http.Client{
-		Timeout: caboose.DefaultSaturnOrchestratorRequestTimeout,
+		Timeout: caboose.DefaultOrchestratorRequestTimeout,
 		Transport: &customTransport{
 			AuthorizationBearerToken: os.Getenv(EnvSaturnLoggerSecret),
 			RoundTripper: &http.Transport{
@@ -53,7 +53,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 	}
 
 	saturnLoggerClient := &http.Client{
-		Timeout: caboose.DefaultSaturnOrchestratorRequestTimeout, // caboose does nto provide custom timeout for logger, reusing one for orchestrator
+		Timeout: caboose.DefaultOrchestratorRequestTimeout, // caboose does nto provide custom timeout for logger, reusing one for orchestrator
 		Transport: &customTransport{
 			AuthorizationBearerToken: os.Getenv(EnvSaturnLoggerSecret),
 			RoundTripper: &http.Transport{
@@ -64,7 +64,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 	}
 
 	saturnRetrievalClient := &http.Client{
-		Timeout: caboose.DefaultSaturnCarRequestTimeout,
+		Timeout: caboose.DefaultCarRequestTimeout,
 		Transport: otelhttp.NewTransport(&customTransport{
 			RoundTripper: &http.Transport{
 				// Increasing concurrency defaults from http.DefaultTransport
@@ -102,7 +102,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 
 		DoValidation: true,
 		PoolRefresh:  caboose.DefaultPoolRefreshInterval,
-		SaturnClient: saturnRetrievalClient,
+		Client:       saturnRetrievalClient,
 
 		ComplianceCidPeriod: int64(5),
 	})
