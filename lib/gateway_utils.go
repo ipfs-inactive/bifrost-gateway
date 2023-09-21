@@ -54,7 +54,7 @@ func GatewayError(err error) error {
 
 	// All timeouts should produce 504 Gateway Timeout
 	if errors.Is(err, context.DeadlineExceeded) ||
-		errors.Is(err, caboose.ErrSaturnTimeout) ||
+		errors.Is(err, caboose.ErrTimeout) ||
 		// Unfortunately this is not an exported type so we have to check for the content.
 		strings.Contains(err.Error(), "Client.Timeout exceeded") {
 		return fmt.Errorf("%w: %s", gateway.ErrGatewayTimeout, err.Error())
