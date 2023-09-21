@@ -43,7 +43,7 @@ jobs:
           for record in $records
           do
               key=$(basename -s .ipns-record "$record" | cut -d'_' -f1)
-              ipfs routing put --allow-offline --offline "/ipns/$key" "$record"
+              ipfs routing put --allow-offline "/ipns/$key" "$record"
           done
 
           # Import dnslink records
