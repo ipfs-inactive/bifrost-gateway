@@ -85,6 +85,7 @@ func newCabooseBlockStore(orchestrator, loggingEndpoint string, cdns *cachedDNS)
 					// to save CPU and to avoid catastrophic failure when
 					// Saturn L1s suddenly switch to certs with different DNS name.
 					InsecureSkipVerify: true,
+					
 					// ServerName:         "strn.pl",
 				},
 				ForceAttemptHTTP2: true,
