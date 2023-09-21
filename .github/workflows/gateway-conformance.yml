@@ -17,18 +17,18 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v4
         with:
-          go-version: 1.19.x
+          go-version: 1.20.x
 
       - name: Install Kubo gateway from source
         #uses: ipfs/download-ipfs-distribution-action@v1
         run: |
-          go install github.com/ipfs/kubo/cmd/ipfs@73552dfd9c6f73fdab887c4d2e99cf7e848a3c23
+          go install github.com/ipfs/kubo/cmd/ipfs@4e3008fdf349e9506c95e36839b8bc832c3aab54
       - name: Start Kubo gateway
         uses: ipfs/start-ipfs-daemon-action@v1
 
       # 2. Download the gateway-conformance fixtures
       - name: Download gateway-conformance fixtures
-        uses: ipfs/gateway-conformance/.github/actions/extract-fixtures@v0.3
+        uses: ipfs/gateway-conformance/.github/actions/extract-fixtures@v0.3.0
         with:
           output: fixtures
 
@@ -43,7 +43,7 @@ jobs:
           for record in $records
           do
               key=$(basename -s .ipns-record "$record" | cut -d'_' -f1)
-              ipfs routing put --allow-offline --offline "/ipns/$key" "$record"
+              ipfs routing put --allow-offline "/ipns/$key" "$record"
           done
 
           # Import dnslink records
@@ -78,7 +78,7 @@ jobs:
 
       # 6. Run the gateway-conformance tests
       - name: Run gateway-conformance tests
-        uses: ipfs/gateway-conformance/.github/actions/test@v0.3
+        uses: ipfs/gateway-conformance/.github/actions/test@v0.3.0
         with:
           gateway-url: http://127.0.0.1:8081
           json: output.json
