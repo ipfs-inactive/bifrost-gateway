@@ -22,13 +22,13 @@ jobs:
       - name: Install Kubo gateway from source
         #uses: ipfs/download-ipfs-distribution-action@v1
         run: |
-          go install github.com/ipfs/kubo/cmd/ipfs@4e3008fdf349e9506c95e36839b8bc832c3aab54
+          go install github.com/ipfs/kubo/cmd/ipfs@v0.23.0-rc1
       - name: Start Kubo gateway
         uses: ipfs/start-ipfs-daemon-action@v1
 
       # 2. Download the gateway-conformance fixtures
       - name: Download gateway-conformance fixtures
-        uses: ipfs/gateway-conformance/.github/actions/extract-fixtures@v0.4
+        uses: ipfs/gateway-conformance/.github/actions/extract-fixtures@v0.4.0
         with:
           output: fixtures
 
@@ -78,7 +78,7 @@ jobs:
 
       # 6. Run the gateway-conformance tests
       - name: Run gateway-conformance tests
-        uses: ipfs/gateway-conformance/.github/actions/test@v0.4
+        uses: ipfs/gateway-conformance/.github/actions/test@v0.4.0
         with:
           gateway-url: http://127.0.0.1:8081
           json: output.json
