@@ -70,15 +70,15 @@ func withRequestLogger(next http.Handler) http.Handler {
 	})
 }
 
-func makeGatewayHandler(bs bstore.Blockstore, kuboRPC, gatewayURLs []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphBackend bool) (*http.Server, error) {
+func makeGatewayHandler(bs bstore.Blockstore, kuboRPC, ipnsRecordGateways []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphBackend bool) (*http.Server, error) {
 	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway or kubo RPC.
 	var routing routing.ValueStore
-	if len(gatewayURLs) != 0 {
-		routing = newProxyRouting(gatewayURLs, cdns)
+	if len(ipnsRecordGateways) != 0 {
+		routing = newProxyRouting(ipnsRecordGateways, cdns)
 	} else if len(kuboRPC) != 0 {
 		routing = newRPCProxyRouting(kuboRPC, cdns)
 	} else {
-		return nil, errors.New("kubo rpc or gateway urls must be provided in order to delegate routing")
+		return nil, errors.New("either KUBO_RPC_URL, IPNS_RECORD_GATEWAY_URL or PROXY_GATEWAY_URL with support for application/vnd.ipfs.ipns-record must be provided in order to delegate IPNS routing")
 	}
 
 	// Sets up a cache to store blocks in

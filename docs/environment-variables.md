@@ -59,15 +59,15 @@ in the near feature.
 Single URL or a comma separated list of Gateway endpoints that support `?format=block|car|ipns-record`
 responses. Either this variable or `STRN_ORCHESTRATOR_URL` must be set.
 
-If this gateway does not support `application/vnd.ipfs.ipns-record`, you can use `IPNS_RECORD_GATEWAY`
+If this gateway does not support `application/vnd.ipfs.ipns-record`, you can use `IPNS_RECORD_GATEWAY_URL`
 to override the gateway address from which to retrieve IPNS Records from.
 
-### `IPNS_RECORD_GATEWAY`
+### `IPNS_RECORD_GATEWAY_URL`
 
 Single URL or a comma separated list of Gateway endpoints that support requests for `application/vnd.ipfs.ipns-record`.
 This is used for IPNS Record routing.
 
-`IPNS_RECORD_GATEWAY` also supports [Routing V1 HTTP API](https://specs.ipfs.tech/routing/http-routing-v1/)
+`IPNS_RECORD_GATEWAY_URL` also supports [Routing V1 HTTP API](https://specs.ipfs.tech/routing/http-routing-v1/)
 for IPNS Record routing ([IPIP-379](https://specs.ipfs.tech/ipips/ipip-0379/)). To use it, the provided URL must end with `/routing/v1`.
 
 If not set, the IPNS records will be fetched from `KUBO_RPC_URL`.

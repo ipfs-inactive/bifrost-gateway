@@ -32,7 +32,7 @@ func main() {
 
 const (
 	EnvKuboRPC           = "KUBO_RPC_URL"
-	EnvIPNSRecordGateway = "IPNS_RECORD_GATEWAY"
+	EnvIPNSRecordGateway = "IPNS_RECORD_GATEWAY_URL"
 	EnvBlockCacheSize    = "BLOCK_CACHE_SIZE"
 	EnvGraphBackend      = "GRAPH_BACKEND"
 	RequestIDHeader      = "X-Bfid"
@@ -108,8 +108,15 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 			log.Fatalf("Unable to start. bifrost-gateway requires either PROXY_GATEWAY_URL or STRN_ORCHESTRATOR_URL to be set.\n\nRead docs at https://github.com/ipfs/bifrost-gateway/blob/main/docs/environment-variables.md\n\n")
 		}
 
-		ipnsProxyGateway := getEnvs(EnvIPNSRecordGateway, "")
-		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, ipnsProxyGateway, gatewayPort, blockCacheSize, cdns, useGraphBackend)
+		// Prefer IPNS_RECORD_GATEWAY_URL when an explicit URL for IPNS routing is set
+		ipnsRecordGateway := getEnvs(EnvIPNSRecordGateway, "")
+		if len(ipnsRecordGateway) == 0 {
+			// Fallback to PROXY_GATEWAY_URL, assuming it is modern
+			// enough to support application/vnd.ipfs.ipns-record responses
+			ipnsRecordGateway = proxyGateway
+		}
+
+		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, ipnsRecordGateway, gatewayPort, blockCacheSize, cdns, useGraphBackend)
 		if err != nil {
 			return err
 		}

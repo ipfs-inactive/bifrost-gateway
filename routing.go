@@ -156,17 +156,17 @@ func (ps *rpcProxyRouting) getRandomKuboURL() string {
 }
 
 type proxyRouting struct {
-	gatewayURLs []string
-	httpClient  *http.Client
-	rand        *rand.Rand
+	ipnsRecordGateways []string
+	httpClient         *http.Client
+	rand               *rand.Rand
 }
 
-func newProxyRouting(gatewayURLs []string, cdns *cachedDNS) routing.ValueStore {
+func newProxyRouting(ipnsRecordGateways []string, cdns *cachedDNS) routing.ValueStore {
 	s := rand.NewSource(time.Now().Unix())
 	rand := rand.New(s)
 
 	return &proxyRouting{
-		gatewayURLs: gatewayURLs,
+		ipnsRecordGateways: ipnsRecordGateways,
 		httpClient: &http.Client{
 			Transport: otelhttp.NewTransport(&customTransport{
 				// RoundTripper with increased defaults than http.Transport such that retrieving
@@ -276,5 +276,5 @@ func (ps *proxyRouting) fetch(ctx context.Context, name ipns.Name) ([]byte, erro
 }
 
 func (ps *proxyRouting) getRandomGatewayURL() string {
-	return strings.TrimSuffix(ps.gatewayURLs[ps.rand.Intn(len(ps.gatewayURLs))], "/")
+	return strings.TrimSuffix(ps.ipnsRecordGateways[ps.rand.Intn(len(ps.ipnsRecordGateways))], "/")
 }
