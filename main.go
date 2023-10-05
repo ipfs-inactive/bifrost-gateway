@@ -31,10 +31,11 @@ func main() {
 }
 
 const (
-	EnvKuboRPC        = "KUBO_RPC_URL"
-	EnvBlockCacheSize = "BLOCK_CACHE_SIZE"
-	EnvGraphBackend   = "GRAPH_BACKEND"
-	RequestIDHeader   = "X-Bfid"
+	EnvKuboRPC           = "KUBO_RPC_URL"
+	EnvIPNSRecordGateway = "IPNS_RECORD_GATEWAY_URL"
+	EnvBlockCacheSize    = "BLOCK_CACHE_SIZE"
+	EnvGraphBackend      = "GRAPH_BACKEND"
+	RequestIDHeader      = "X-Bfid"
 )
 
 func init() {
@@ -57,7 +58,7 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		// Get env variables.
 		saturnOrchestrator := getEnv(EnvSaturnOrchestrator, "")
 		proxyGateway := getEnvs(EnvProxyGateway, "")
-		kuboRPC := getEnvs(EnvKuboRPC, DefaultKuboRPC)
+		kuboRPC := getEnvs(EnvKuboRPC, "")
 
 		blockCacheSize, err := getEnvInt(EnvBlockCacheSize, lib.DefaultCacheBlockStoreSize)
 		if err != nil {
@@ -107,7 +108,15 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 			log.Fatalf("Unable to start. bifrost-gateway requires either PROXY_GATEWAY_URL or STRN_ORCHESTRATOR_URL to be set.\n\nRead docs at https://github.com/ipfs/bifrost-gateway/blob/main/docs/environment-variables.md\n\n")
 		}
 
-		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, gatewayPort, blockCacheSize, cdns, useGraphBackend)
+		// Prefer IPNS_RECORD_GATEWAY_URL when an explicit URL for IPNS routing is set
+		ipnsRecordGateway := getEnvs(EnvIPNSRecordGateway, "")
+		if len(ipnsRecordGateway) == 0 {
+			// Fallback to PROXY_GATEWAY_URL, assuming it is modern
+			// enough to support application/vnd.ipfs.ipns-record responses
+			ipnsRecordGateway = proxyGateway
+		}
+
+		gatewaySrv, err := makeGatewayHandler(bs, kuboRPC, ipnsRecordGateway, gatewayPort, blockCacheSize, cdns, useGraphBackend)
 		if err != nil {
 			return err
 		}
@@ -128,7 +137,10 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 			log.Printf("%s: %d", EnvBlockCacheSize, blockCacheSize)
 			log.Printf("%s: %t", EnvGraphBackend, useGraphBackend)
 
-			log.Printf("Legacy RPC at /api/v0 (%s) provided by %s", EnvKuboRPC, strings.Join(kuboRPC, " "))
+			if len(kuboRPC) != 0 {
+				log.Printf("Legacy RPC at /api/v0 (%s) provided by %s", EnvKuboRPC, strings.Join(kuboRPC, " "))
+			}
+
 			log.Printf("Path gateway listening on http://127.0.0.1:%d", gatewayPort)
 			log.Printf("  Smoke test (JPG): http://127.0.0.1:%d/ipfs/bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi", gatewayPort)
 			log.Printf("Subdomain gateway configured on dweb.link and http://localhost:%d", gatewayPort)

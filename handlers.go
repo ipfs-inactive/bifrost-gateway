@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/ipfs/bifrost-gateway/lib"
+	"github.com/libp2p/go-libp2p/core/routing"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/filecoin-saturn/caboose"
@@ -68,9 +70,16 @@ func withRequestLogger(next http.Handler) http.Handler {
 	})
 }
 
-func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphBackend bool) (*http.Server, error) {
-	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway.
-	routing := newProxyRouting(kuboRPC, cdns)
+func makeGatewayHandler(bs bstore.Blockstore, kuboRPC, ipnsRecordGateways []string, port int, blockCacheSize int, cdns *cachedDNS, useGraphBackend bool) (*http.Server, error) {
+	// Sets up the routing system, which will proxy the IPNS routing requests to the given gateway or kubo RPC.
+	var routing routing.ValueStore
+	if len(ipnsRecordGateways) != 0 {
+		routing = newProxyRouting(ipnsRecordGateways, cdns)
+	} else if len(kuboRPC) != 0 {
+		routing = newRPCProxyRouting(kuboRPC, cdns)
+	} else {
+		return nil, errors.New("either KUBO_RPC_URL, IPNS_RECORD_GATEWAY_URL or PROXY_GATEWAY_URL with support for application/vnd.ipfs.ipns-record must be provided in order to delegate IPNS routing")
+	}
 
 	// Sets up a cache to store blocks in
 	cacheBlockStore, err := lib.NewCacheBlockStore(blockCacheSize)
@@ -157,10 +166,13 @@ func makeGatewayHandler(bs bstore.Blockstore, kuboRPC []string, port int, blockC
 	mux := http.NewServeMux()
 	mux.Handle("/ipfs/", ipfsHandler)
 	mux.Handle("/ipns/", ipnsHandler)
-	// TODO: below is legacy which we want to remove, measuring this separately
-	// allows us to decide when is the time to do it.
-	legacyKuboRpcHandler := withHTTPMetrics(newKuboRPCHandler(kuboRPC), "legacyKuboRpc")
-	mux.Handle("/api/v0/", legacyKuboRpcHandler)
+
+	if len(kuboRPC) != 0 {
+		// TODO: below is legacy which we want to remove, measuring this separately
+		// allows us to decide when is the time to do it.
+		legacyKuboRpcHandler := withHTTPMetrics(newKuboRPCHandler(kuboRPC), "legacyKuboRpc")
+		mux.Handle("/api/v0/", legacyKuboRpcHandler)
+	}
 
 	// Construct the HTTP handler for the gateway.
 	handler := withConnect(mux)

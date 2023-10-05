@@ -26,12 +26,9 @@
 
 ### `KUBO_RPC_URL`
 
-Default: see `DefaultKuboRPC`
-
 Single URL or a comma separated list of RPC endpoints that provide `/api/v0` from Kubo.
-
-We use this as temporary solution for IPNS Record routing until [IPIP-351](https://github.com/ipfs/specs/pull/351) ships with Kubo 0.19,
-and we also redirect some legacy `/api/v0` commands that need to be handled on `ipfs.io`.
+This is used to redirect legacy `/api/v0` commands that need to be handled on `ipfs.io`.
+If this is not set, the redirects are not set up.
 
 ### `BLOCK_CACHE_SIZE`
 
@@ -59,9 +56,21 @@ in the near feature.
 
 ### `PROXY_GATEWAY_URL`
 
-Single URL or a comma separated list of Gateway endpoints that support `?format=block|car`
-responses. This is used by default with `http://127.0.0.1:8080` unless `STRN_ORCHESTRATOR_URL`
-is set.
+Single URL or a comma separated list of Gateway endpoints that support `?format=block|car|ipns-record`
+responses. Either this variable or `STRN_ORCHESTRATOR_URL` must be set.
+
+If this gateway does not support `application/vnd.ipfs.ipns-record`, you can use `IPNS_RECORD_GATEWAY_URL`
+to override the gateway address from which to retrieve IPNS Records from.
+
+### `IPNS_RECORD_GATEWAY_URL`
+
+Single URL or a comma separated list of Gateway endpoints that support requests for `application/vnd.ipfs.ipns-record`.
+This is used for IPNS Record routing.
+
+`IPNS_RECORD_GATEWAY_URL` also supports [Routing V1 HTTP API](https://specs.ipfs.tech/routing/http-routing-v1/)
+for IPNS Record routing ([IPIP-379](https://specs.ipfs.tech/ipips/ipip-0379/)). To use it, the provided URL must end with `/routing/v1`.
+
+If not set, the IPNS records will be fetched from `KUBO_RPC_URL`.
 
 ## Saturn Backend
 
