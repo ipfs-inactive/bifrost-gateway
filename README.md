@@ -9,11 +9,12 @@ bifrost-gateway
   - [Configuration](#configuration)
   - [Docker](#docker)
 - [FAQ](#faq)
-  - [How to run with local gateway as a backend](#how-to-run-with-local-gateway-as-a-backend)
+  - [How to use other gateway as a block backend](#how-to-use-other-gateway-as-a-block-backend)
   - [How to run with Saturn CDN backend](#how-to-run-with-saturn-cdn-backend)
   - [How to debug](#how-to-debug)
   - [How to use tracing](#how-to-use-tracing)
-  - [How does this work at ipfs.io and dweb.link](#how-does-this-work-at-ipfsio-and-dweblink)
+  - [How could this work for hosting a public IPFS gateway](#how-could-this-work-for-hosting-a-public-ipfs-gateway)
+  - [How does high level overview look like](#how-does-high-level-overview-look-like)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -111,7 +112,7 @@ on how to generate the `traceparent` HTTP header in order to be able to easily
 identify specific requests.
 
 
-### How does this work at ipfs.io and dweb.link
+### How could this work for hosting a public IPFS gateway
 
 This is WIP, but the high level architecture is to move from
 
@@ -182,8 +183,8 @@ graph LR
 
 `bifrost-gateway` nodes are responsible for processing requests to:
 
-- [path gateway](https://docs.ipfs.tech/how-to/address-ipfs-on-web/#path-gateway) at `ipfs.io`
-- [subdomain gateway](https://docs.ipfs.tech/how-to/address-ipfs-on-web/#subdomain-gateway) at `dweb.link`
+- [path gateway](https://docs.ipfs.tech/how-to/address-ipfs-on-web/#path-gateway) (like `ipfs.io`)
+- [subdomain gateway](https://docs.ipfs.tech/how-to/address-ipfs-on-web/#subdomain-gateway) (like `dweb.link`)
 - [selected DNSLink websites](https://github.com/protocol/bifrost-infra/blob/b6f85a54fddf1c21a966f8d5e5a3e31f54ad5431/ansible/inventories/bifrost/group_vars/collab_cluster.yml#L140-L271) on their own domain names.
 
 Caveats:
@@ -191,7 +192,9 @@ Caveats:
 - IPFS Gateway interface based on reference implementation from [boxo/gateway](https://github.com/ipfs/boxo/tree/main/gateway#readme).
 - IPFS Backend based on https://saturn.tech and HTTP client talking to it  via [caboose](https://github.com/filecoin-saturn/caboose) with `STRN_LOGGER_SECRET`.
   - Learn more at [Project Rhea (decentralized IPFS gateway)](https://pl-strflt.notion.site/Project-Rhea-decentralized-IPFS-gateway-3d5906e7a0d84bea800d5920005dfea6)
-- Functional gaps facilitated by temporary delegation to legacy Kubo RPC (`/api/v0`) at `https://node[0-3].delegate.ipfs.io` infra (already used by js-ipfs).
+- Remaining functional gaps facilitated by:
+  - (initially) temporary delegation to legacy Kubo RPC (`/api/v0`) at `https://node[0-3].delegate.ipfs.io` infra (legacy nodes used by js-ipfs, in process of deprecation).
+  - (long-term) `IPNS_RECORD_GATEWAY_URL` endpoint capable of resolving `GET /ipns/{name}` with `Accept: application/vnd.ipfs.ipns-record`
 
 ### How does high level overview look like
 
