@@ -26,9 +26,12 @@
 
 ### `KUBO_RPC_URL`
 
-Single URL or a comma separated list of RPC endpoints that provide `/api/v0` from Kubo.
-This is used to redirect legacy `/api/v0` commands that need to be handled on `ipfs.io`.
-If this is not set, the redirects are not set up.
+Single URL or a comma separated list of RPC endpoints that provide `/api/v0` RPC from Kubo.
+
+The URL will be used for handling a subset of legacy `/api/v0` commands,
+and also for IPNS Record resolution (via `/api/v0/dht/query` RPC).
+
+If this is not set, the `/api/v0` is not exposed, and `IPNS_RECORD_GATEWAY_URL` has to be set for IPNS resolution to work.
 
 ### `BLOCK_CACHE_SIZE`
 
