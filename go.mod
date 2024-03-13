@@ -2,7 +2,6 @@ module github.com/ipfs/bifrost-gateway
 
 go 1.21
 
-
 require (
 	github.com/filecoin-saturn/caboose v0.0.3-0.20231003130900-1015a7fc2287
 	github.com/hashicorp/go-multierror v1.1.1
