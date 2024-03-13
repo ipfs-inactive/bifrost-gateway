@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+
 	"github.com/ipfs/boxo/files"
 	"github.com/ipfs/boxo/gateway"
 	blocks "github.com/ipfs/go-block-format"
@@ -18,7 +20,6 @@ import (
 	"github.com/ipld/go-ipld-prime/node/basicnode"
 	"github.com/ipld/go-ipld-prime/schema"
 	"github.com/multiformats/go-multicodec"
-	"io"
 )
 
 type AwaitCloser interface {
