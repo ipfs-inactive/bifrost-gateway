@@ -3,9 +3,10 @@ package lib
 import (
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 
 	ifacepath "github.com/ipfs/boxo/coreiface/path"
 	"github.com/ipfs/boxo/gateway"
