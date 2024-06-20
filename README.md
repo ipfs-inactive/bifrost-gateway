@@ -1,3 +1,22 @@
+> [!WARNING]
+>
+> # ⚠️  `bifrost-gateway` is no longer maintained
+>
+> You can continue using it, but it won't receive any security updates or
+> fixes. Consider forking or migrating to [Rainbow](https://github.com/ipfs/rainbow/).
+>
+> ## ℹ️ Migrating to Rainbow 🌈
+>
+> The `PROXY_GATEWAY_URL` functionality is backported to [Rainbow](https://github.com/ipfs/rainbow/).
+>
+> To use Rainbow with a remote block or CAR backend, configure it with:
+>
+>  `RAINBOW_REMOTE_BACKENDS=<gwurl>`
+>  `RAINBOW_REMOTE_BACKENDS_MODE=block|car`
+>
+> For configuration details, visit:
+> https://github.com/ipfs/rainbow/blob/main/docs/environment-variables.md
+
 bifrost-gateway
 =======================
 

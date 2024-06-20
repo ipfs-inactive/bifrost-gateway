@@ -71,6 +71,7 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 		}
 
 		log.Printf("Starting %s %s", name, version)
+
 		registerVersionMetric(version)
 
 		tp, shutdown, err := newTracerProvider(cmd.Context())
@@ -102,6 +103,47 @@ See documentation at: https://github.com/ipfs/bifrost-gateway/#readme`,
 				return err
 			}
 		} else if len(proxyGateway) != 0 {
+			log.Printf(`
+
+⚠️  PROJECT NO LONGER MAINTAINED
+
+  The bifrost-gateway project is no longer maintained.
+
+  You can continue using it, but it won't receive any security updates or
+  fixes. Consider forking or migrating to Rainbow.
+
+ℹ️ MIGRATING TO RAINBOW
+
+  The PROXY_GATEWAY_URL functionality is backported to Rainbow
+  https://github.com/ipfs/rainbow/
+
+  To use Rainbow with a remote block or CAR backend, configure it with:
+  RAINBOW_REMOTE_BACKENDS=<gwurl>
+  RAINBOW_REMOTE_BACKENDS_MODE=block|car
+
+  For details, visit:
+  at https://github.com/ipfs/rainbow/blob/main/docs/environment-variables.md
+
+
+  TLDR:
+
+	If you currently use:
+
+    PROXY_GATEWAY_URL=http://127.0.0.1:8080 \
+    GRAPH_BACKEND=false \
+    ./bifrost-gateway
+
+    It can be replaced with:
+
+    RAINBOW_REMOTE_BACKENDS=http://127.0.0.1:8080 \
+    RAINBOW_REMOTE_BACKENDS_MODE=block \
+    ./rainbow
+
+	Rainbow docker images:
+	https://github.com/ipfs/rainbow#docker
+
+`)
+
 			log.Printf("Proxy backend (PROXY_GATEWAY_URL) at %s", strings.Join(proxyGateway, " "))
 			bs = newProxyBlockStore(proxyGateway, cdns)
 		} else {
